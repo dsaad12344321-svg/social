@@ -5,9 +5,7 @@ dist/
 .env
 .env.local
 .vercel/node_modules/
-.next/
-out/
-dist/
-.env
-.env.local
-.vercel/
+
+
+
+
