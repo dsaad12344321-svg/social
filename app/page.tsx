@@ -30,7 +30,19 @@ export default function Dashboard(){
   const [section,setSection]=useState("Dashboard");
 
   useEffect(()=>{try{const raw=localStorage.getItem(STORAGE);if(raw)setPosts(JSON.parse(raw));}catch{}},[]);
-  useEffect(()=>{localStorage.setItem(STORAGE,JSON.stringify(posts));},[posts]);
+  
+  useEffect(() => {
+  try {
+    const postsForStorage = posts.map((post) => ({
+      ...post,
+      image: "",
+    }));
+
+    localStorage.setItem(STORAGE, JSON.stringify(postsForStorage));
+  } catch (error) {
+    console.error("Failed to save posts:", error);
+  }
+}, [posts]);
 
   useEffect(()=>{
     const onMessage=(event:MessageEvent)=>{
