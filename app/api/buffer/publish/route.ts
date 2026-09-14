@@ -4,7 +4,10 @@ type BufferChannel = {
   id: string;
   name: string;
   displayName?: string | null;
+  descriptor?: string | null;
+  externalLink?: string | null;
   service: string;
+  avatar?: string | null;
   isQueuePaused?: boolean;
   isDisconnected?: boolean;
   isLocked?: boolean;
@@ -12,6 +15,11 @@ type BufferChannel = {
   organizationId: string;
   organizationName: string;
   ownerEmail?: string;
+};
+
+type BufferAccountError = {
+  account: number;
+  error: string;
 };
 
 async function bufferRequest(
@@ -32,9 +40,22 @@ async function bufferRequest(
     cache: "no-store",
   });
 
-  const data = await response.json();
+  const responseText = await response.text();
 
-  console.log("BUFFER RAW RESPONSE:", JSON.stringify(data, null, 2));
+  let data: any;
+
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = {
+      rawText: responseText,
+    };
+  }
+
+  console.log(
+    "BUFFER RAW RESPONSE:",
+    JSON.stringify(data, null, 2)
+  );
 
   return {
     httpStatus: response.status,
@@ -47,54 +68,63 @@ async function getChannels(
   account: number
 ): Promise<{
   channels: BufferChannel[];
-  errors: string[];
+  errors: BufferAccountError[];
 }> {
+  const channels: BufferChannel[] = [];
+  const errors: BufferAccountError[] = [];
+
   const organizationsQuery = `
-    query GetOrganizations {
+    query {
       account {
         organizations {
           id
           name
-          ownerEmail
         }
       }
     }
   `;
 
-  const orgResult = await bufferRequest(
+  const organizationsResult = await bufferRequest(
     apiKey,
     organizationsQuery
   );
 
-  const orgs =
-    orgResult.data?.data?.account?.organizations || [];
+  if (
+    organizationsResult.data?.errors?.length
+  ) {
+    errors.push({
+      account,
+      error:
+        organizationsResult.data.errors
+          .map(
+            (error: any) =>
+              error?.message ||
+              "Failed to load Buffer organizations"
+          )
+          .join("; "),
+    });
 
-  if (orgResult.data?.errors?.length) {
     return {
-      channels: [],
-      errors: orgResult.data.errors.map(
-        (error: any) =>
-          `Account ${account}: ${
-            error?.message || "Buffer API error"
-          }`
-      ),
+      channels,
+      errors,
     };
   }
 
-  const allChannels: BufferChannel[] = [];
-  const errors: string[] = [];
+  const organizations =
+    organizationsResult.data?.data?.account
+      ?.organizations || [];
 
-  for (const organization of orgs) {
+  for (const organization of organizations) {
     const channelsQuery = `
       query GetChannels($organizationId: OrganizationId!) {
         channels(
-          input: {
-            organizationId: $organizationId
-          }
+          organizationId: $organizationId
         ) {
           id
           name
           displayName
+          descriptor
+          externalLink
           service
           avatar
           isQueuePaused
@@ -113,39 +143,45 @@ async function getChannels(
     );
 
     if (result.data?.errors?.length) {
-      errors.push(
-        ...result.data.errors.map(
-          (error: any) =>
-            `Account ${account} / ${organization.name}: ${
-              error?.message || "Buffer API error"
-            }`
-        )
-      );
+      errors.push({
+        account,
+        error:
+          result.data.errors
+            .map(
+              (error: any) =>
+                error?.message ||
+                "Failed to load Buffer channels"
+            )
+            .join("; "),
+      });
 
       continue;
     }
 
-    const channels =
+    const organizationChannels =
       result.data?.data?.channels || [];
 
-    for (const channel of channels) {
-      allChannels.push({
+    for (const channel of organizationChannels) {
+      channels.push({
         ...channel,
         account,
-        organizationId: organization.id,
-        organizationName: organization.name,
-        ownerEmail: organization.ownerEmail,
+        organizationId:
+          organization.id,
+        organizationName:
+          organization.name,
       });
     }
   }
 
   return {
-    channels: allChannels,
+    channels,
     errors,
   };
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
     const body = await request.json();
 
@@ -153,16 +189,10 @@ export async function POST(request: Request) {
     const caption = body?.caption;
     const channelIds = body?.channelIds;
 
-    console.log("BUFFER PUBLISH REQUEST:", {
-      imageUrl,
-      captionLength:
-        typeof caption === "string"
-          ? caption.length
-          : 0,
-      channelIds,
-    });
-
-    if (!imageUrl || typeof imageUrl !== "string") {
+    if (
+      !imageUrl ||
+      typeof imageUrl !== "string"
+    ) {
       return Response.json(
         {
           success: false,
@@ -172,21 +202,24 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!imageUrl.startsWith("https://")) {
+    if (
+      !imageUrl.startsWith("https://")
+    ) {
       return Response.json(
         {
           success: false,
           error:
-            "Buffer requires a public HTTPS image URL",
-          debug: {
-            imageUrl,
-          },
+            "imageUrl must be a public HTTPS URL",
         },
         { status: 400 }
       );
     }
 
-    if (!caption || typeof caption !== "string") {
+    if (
+      !caption ||
+      typeof caption !== "string" ||
+      !caption.trim()
+    ) {
       return Response.json(
         {
           success: false,
@@ -203,21 +236,20 @@ export async function POST(request: Request) {
       return Response.json(
         {
           success: false,
-          error: "No Buffer channels selected",
+          error:
+            "At least one Buffer channel is required",
         },
         { status: 400 }
       );
     }
 
-    const apiKeys = [
-      process.env.BUFFER_API_KEY_1,
-      process.env.BUFFER_API_KEY_2,
-    ].filter(
-      (key): key is string =>
-        Boolean(key)
-    );
+    const apiKey1 =
+      process.env.BUFFER_API_KEY_1;
 
-    if (apiKeys.length === 0) {
+    const apiKey2 =
+      process.env.BUFFER_API_KEY_2;
+
+    if (!apiKey1 && !apiKey2) {
       return Response.json(
         {
           success: false,
@@ -228,17 +260,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const allChannels: BufferChannel[] = [];
-    const accountErrors: string[] = [];
+    const allChannels: BufferChannel[] =
+      [];
 
-    for (
-      let i = 0;
-      i < apiKeys.length;
-      i++
-    ) {
+    const accountErrors: BufferAccountError[] =
+      [];
+
+    if (apiKey1) {
       const result = await getChannels(
-        apiKeys[i],
-        i + 1
+        apiKey1,
+        1
       );
 
       allChannels.push(
@@ -250,38 +281,30 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(
-      "BUFFER CHANNELS:",
-      JSON.stringify(
-        allChannels,
-        null,
+    if (apiKey2) {
+      const result = await getChannels(
+        apiKey2,
         2
-      )
-    );
+      );
 
-    console.log(
-      "SELECTED CHANNEL IDS:",
-      channelIds
-    );
+      allChannels.push(
+        ...result.channels
+      );
+
+      accountErrors.push(
+        ...result.errors
+      );
+    }
 
     const selectedChannels =
       allChannels.filter((channel) =>
         channelIds.includes(channel.id)
       );
 
-    console.log(
-      "SELECTED CHANNELS FOUND:",
-      JSON.stringify(
-        selectedChannels,
-        null,
-        2
-      )
-    );
-
     const missingChannelIds =
       channelIds.filter(
         (id: string) =>
-          !allChannels.some(
+          !selectedChannels.some(
             (channel) =>
               channel.id === id
           )
@@ -292,52 +315,57 @@ export async function POST(request: Request) {
         {
           success: false,
           error:
-            "Some selected Buffer channels were not found",
-          debug: {
-            requestedChannelIds:
-              channelIds,
-            foundChannelIds:
-              allChannels.map(
-                (channel) =>
-                  channel.id
-              ),
-            missingChannelIds,
-            accountErrors,
-          },
+            "Some Buffer channels were not found",
+
+          missingChannelIds,
+
+          availableChannels:
+            allChannels.map((channel) => ({
+              id: channel.id,
+              name: channel.name,
+              displayName:
+                channel.displayName,
+              descriptor:
+                channel.descriptor,
+              externalLink:
+                channel.externalLink,
+              service:
+                channel.service,
+              account:
+                channel.account,
+              organizationName:
+                channel.organizationName,
+              isDisconnected:
+                channel.isDisconnected,
+              isLocked:
+                channel.isLocked,
+            })),
+
+          accountErrors,
         },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
     const results: any[] = [];
 
     for (const channel of selectedChannels) {
-      const apiKey =
-        apiKeys[channel.account - 1];
-
-      if (!apiKey) {
-        results.push({
-          channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          account: channel.account,
-          success: false,
-          error:
-            "No API key for this Buffer account",
-        });
-
-        continue;
-      }
-
       if (channel.isDisconnected) {
         results.push({
           channelId: channel.id,
           channelName:
             channel.displayName ||
             channel.name,
-          service: channel.service,
-          account: channel.account,
+          descriptor:
+            channel.descriptor,
+          externalLink:
+            channel.externalLink,
+          service:
+            channel.service,
+          account:
+            channel.account,
+          organizationName:
+            channel.organizationName,
           success: false,
           error:
             "Buffer channel is disconnected",
@@ -352,11 +380,48 @@ export async function POST(request: Request) {
           channelName:
             channel.displayName ||
             channel.name,
-          service: channel.service,
-          account: channel.account,
+          descriptor:
+            channel.descriptor,
+          externalLink:
+            channel.externalLink,
+          service:
+            channel.service,
+          account:
+            channel.account,
+          organizationName:
+            channel.organizationName,
           success: false,
           error:
             "Buffer channel is locked",
+        });
+
+        continue;
+      }
+
+      const apiKey =
+        channel.account === 1
+          ? apiKey1
+          : apiKey2;
+
+      if (!apiKey) {
+        results.push({
+          channelId: channel.id,
+          channelName:
+            channel.displayName ||
+            channel.name,
+          descriptor:
+            channel.descriptor,
+          externalLink:
+            channel.externalLink,
+          service:
+            channel.service,
+          account:
+            channel.account,
+          organizationName:
+            channel.organizationName,
+          success: false,
+          error:
+            `Missing Buffer API key for account ${channel.account}`,
         });
 
         continue;
@@ -388,6 +453,10 @@ export async function POST(request: Request) {
                 id
                 text
                 status
+                assets {
+                  id
+                  mimeType
+                }
               }
             }
 
@@ -398,64 +467,183 @@ export async function POST(request: Request) {
         }
       `;
 
-      const result =
-        await bufferRequest(
-          apiKey,
-          mutation,
-          {
-            channelId: channel.id,
-            text: caption,
-            imageUrl,
-          }
-        );
+      const result = await bufferRequest(
+        apiKey,
+        mutation,
+        {
+          channelId: channel.id,
+          text: caption.trim(),
+          imageUrl,
+        }
+      );
 
       const createPost =
         result.data?.data?.createPost;
 
-      if (
-        createPost?.post
-      ) {
+      /*
+       * SUCCESS
+       */
+      if (createPost?.post?.id) {
         results.push({
           channelId: channel.id,
           channelName:
             channel.displayName ||
             channel.name,
-          service: channel.service,
-          account: channel.account,
+          descriptor:
+            channel.descriptor,
+          externalLink:
+            channel.externalLink,
+          service:
+            channel.service,
+          account:
+            channel.account,
+          organizationName:
+            channel.organizationName,
           success: true,
           postId:
             createPost.post.id,
           status:
             createPost.post.status,
         });
-      } else {
-        const graphqlErrors =
-          result.data?.errors
-            ?.map(
-              (error: any) =>
-                error?.message
-            )
-            .filter(Boolean) || [];
 
-        const mutationError =
-          createPost?.message;
-
-        results.push({
-          channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          service: channel.service,
-          account: channel.account,
-          success: false,
-          error:
-            mutationError ||
-            graphqlErrors.join("; ") ||
-            "Unknown Buffer error",
-          rawResponse:
-            result.data,
-        });
+        continue;
       }
+
+      /*
+       * REAL BUFFER / GRAPHQL ERROR
+       */
+
+      const graphqlErrors =
+        Array.isArray(
+          result.data?.errors
+        )
+          ? result.data.errors.map(
+              (error: any) => ({
+                message:
+                  error?.message ||
+                  null,
+                path:
+                  error?.path ||
+                  null,
+                extensions:
+                  error?.extensions ||
+                  null,
+              })
+            )
+          : [];
+
+      const mutationError =
+        createPost?.message ||
+        null;
+
+      const rawApiMessage =
+        mutationError ||
+        graphqlErrors
+          .map(
+            (error: any) =>
+              error.message
+          )
+          .filter(Boolean)
+          .join("; ") ||
+        result.data?.message ||
+        result.data?.error ||
+        result.data?.rawText ||
+        null;
+
+      const errorMessage =
+        rawApiMessage ||
+        `Buffer API returned HTTP ${result.httpStatus}`;
+
+      console.error(
+        "========================================"
+      );
+
+      console.error(
+        "BUFFER ORIGINAL API ERROR"
+      );
+
+      console.error(
+        JSON.stringify(
+          {
+            channelId:
+              channel.id,
+            channelName:
+              channel.displayName ||
+              channel.name,
+            service:
+              channel.service,
+            account:
+              channel.account,
+            organization:
+              channel.organizationName,
+            httpStatus:
+              result.httpStatus,
+            mutationError,
+            graphqlErrors,
+            rawResponse:
+              result.data,
+          },
+          null,
+          2
+        )
+      );
+
+      console.error(
+        "========================================"
+      );
+
+      results.push({
+        channelId: channel.id,
+
+        channelName:
+          channel.displayName ||
+          channel.name,
+
+        descriptor:
+          channel.descriptor,
+
+        externalLink:
+          channel.externalLink,
+
+        service:
+          channel.service,
+
+        account:
+          channel.account,
+
+        organizationName:
+          channel.organizationName,
+
+        success: false,
+
+        /*
+         * THIS IS THE ORIGINAL ERROR
+         * RECEIVED FROM BUFFER
+         */
+        error: errorMessage,
+
+        /*
+         * HTTP STATUS FROM BUFFER
+         */
+        httpStatus:
+          result.httpStatus,
+
+        /*
+         * GRAPHQL ERRORS
+         */
+        graphqlErrors,
+
+        /*
+         * MUTATION ERROR
+         */
+        mutationError,
+
+        /*
+         * COMPLETE RAW BUFFER RESPONSE
+         */
+        bufferResponse:
+          result.data,
+      });
     }
 
     const published =
@@ -471,17 +659,26 @@ export async function POST(request: Request) {
       ).length;
 
     return Response.json({
-      success: published > 0 && failed === 0,
+      success:
+        published > 0 &&
+        failed === 0,
+
       partialSuccess:
-        published > 0 && failed > 0,
+        published > 0 &&
+        failed > 0,
+
       published,
       failed,
       total: results.length,
+
       results,
+
       debug: {
         imageUrl,
+
         requestedChannelIds:
           channelIds,
+
         selectedChannels:
           selectedChannels.map(
             (channel) => ({
@@ -489,34 +686,51 @@ export async function POST(request: Request) {
               name: channel.name,
               displayName:
                 channel.displayName,
+              descriptor:
+                channel.descriptor,
+              externalLink:
+                channel.externalLink,
               service:
                 channel.service,
               account:
                 channel.account,
-                organizationName:
-                  channel.organizationName,
+              organizationName:
+                channel.organizationName,
               isDisconnected:
                 channel.isDisconnected,
               isLocked:
                 channel.isLocked,
             })
           ),
+
         accountErrors,
       },
     });
   } catch (error) {
     console.error(
-      "BUFFER PUBLISH ERROR:",
+      "BUFFER PUBLISH SERVER ERROR:",
       error
     );
 
     return Response.json(
       {
         success: false,
+
         error:
           error instanceof Error
             ? error.message
             : "Failed to publish through Buffer",
+
+        serverError:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message:
+                  error.message,
+                stack:
+                  error.stack,
+              }
+            : error,
       },
       { status: 500 }
     );
