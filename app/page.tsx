@@ -13,6 +13,30 @@ type Platform =
   | "TikTok"
   | "X";
 
+type BufferChannel = {
+  id: string;
+  name: string;
+  displayName?: string | null;
+  service: string;
+  avatar?: string | null;
+  isQueuePaused?: boolean;
+  isDisconnected?: boolean;
+  isLocked?: boolean;
+  account: number;
+  organizationId: string;
+  organizationName: string;
+  ownerEmail?: string;
+};
+
+type BufferChannelsResponse = {
+  success: boolean;
+  channels: BufferChannel[];
+  errors?: Array<{
+    account: number;
+    error: string;
+  }>;
+};
+
 type Status =
   | "draft"
   | "scheduled"
@@ -26,6 +50,7 @@ type Post = {
   caption: string;
   image: string;
   platforms: Platform[];
+  channelIds: string[];
   status: Status;
   createdAt: string;
   error?: string;
@@ -100,9 +125,73 @@ export default function Dashboard() {
   const [publishingId, setPublishingId] =
     useState<string | null>(null);
 
+  const [bufferChannels, setBufferChannels] =
+    useState<BufferChannel[]>([]);
+
+  const [selectedChannelIds, setSelectedChannelIds] =
+    useState<string[]>([]);
+
+  const [loadingChannels, setLoadingChannels] =
+    useState(false);
+  
   /*
-   * LOAD POSTS
+   * LOAD POSTS AND CHANNELS
    */
+  
+  useEffect(() => {
+    async function loadBufferChannels() {
+      setLoadingChannels(true);
+
+      try {
+        const response = await fetch(
+          "/api/buffer/channels",
+          {
+            cache: "no-store",
+          }
+        );
+
+        const data =
+          (await response.json()) as BufferChannelsResponse;
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data?.errors?.[0]?.error ||
+              "فشل تحميل حسابات Buffer"
+          );
+        }
+
+        setBufferChannels(
+          Array.isArray(data.channels)
+            ? data.channels
+            : []
+        );
+
+        /*
+        * Initially select all connected channels.
+        */
+        setSelectedChannelIds(
+          (data.channels || [])
+            .filter(
+              (channel) =>
+                !channel.isDisconnected &&
+                !channel.isLocked
+            )
+            .map((channel) => channel.id)
+        );
+      } catch (error) {
+        console.error(
+          "Buffer channels error:",
+          error
+        );
+      } finally {
+        setLoadingChannels(false);
+      }
+    }
+
+    loadBufferChannels();
+  }, []);
+
+
   useEffect(() => {
     try {
       const raw =
@@ -224,6 +313,8 @@ export default function Dashboard() {
               "Instagram",
             ],
 
+            channelIds: selectedChannelIds,
+
             status: "draft",
 
             createdAt:
@@ -262,6 +353,8 @@ export default function Dashboard() {
               "Facebook",
               "Instagram",
             ],
+
+            channelIds: selectedChannelIds,
 
             status: "failed",
 
@@ -312,6 +405,8 @@ export default function Dashboard() {
           "Facebook",
           "Instagram",
         ],
+
+        channelIds: selectedChannelIds,
 
         status: "draft",
 
@@ -405,21 +500,14 @@ export default function Dashboard() {
 
     const post: Post = {
       id: crypto.randomUUID(),
-
       source,
-
       title: titleFor(source),
-
       caption,
-
       image,
-
       platforms,
-
+      channelIds: selectedChannelIds,
       status,
-
-      createdAt:
-        new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     };
 
     setPosts((current) => [
@@ -470,197 +558,112 @@ export default function Dashboard() {
   /*
    * PUBLISH POST
    */
-  async function publishPost(
-    post: Post
-  ) {
-    if (publishingId) {
-      return;
+
+async function publishPost(post: Post) {
+  if (!post.image) {
+    alert("لا توجد صورة لهذا المنشور");
+    return;
+  }
+
+  if (!post.caption.trim()) {
+    alert("لا يوجد Caption لهذا المنشور");
+    return;
+  }
+
+  if (!post.channelIds || post.channelIds.length === 0) {
+    alert("اختر حسابًا واحدًا على الأقل من Buffer");
+    return;
+  }
+
+  setPublishingId(post.id);
+
+  try {
+    const response = await fetch(
+      "/api/buffer/publish",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageUrl: post.image,
+          caption: post.caption,
+          channelIds: post.channelIds,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.success && !data.partialSuccess) {
+      throw new Error(
+        data?.error ||
+          "فشل نشر المنشور عبر Buffer"
+      );
     }
 
-    if (!post.platforms.length) {
-      alert(
-        "اختر منصة واحدة على الأقل"
-      );
-      return;
-    }
-
-    if (!post.image) {
-      alert(
-        "لا توجد صورة لهذا المنشور"
-      );
-      return;
-    }
-
-    const supportedPlatforms =
-      post.platforms.filter(
-        (platform) =>
-          platform === "Facebook" ||
-          platform === "Instagram"
-      );
-
-    if (
-      !supportedPlatforms.length
-    ) {
-      alert(
-        "النشر متاح حاليًا على Facebook و Instagram فقط."
-      );
-      return;
-    }
-
-    setPublishingId(post.id);
-
-    /*
-     * Mark as scheduled while publishing.
-     */
-    setPosts((current) =>
-      current.map((item) =>
+    setPosts((prev) =>
+      prev.map((item) =>
         item.id === post.id
           ? {
               ...item,
-              status: "scheduled",
-              error: undefined,
+              status:
+                data.partialSuccess
+                  ? "failed"
+                  : "published",
+              error:
+                data.partialSuccess
+                  ? `تم النشر على ${data.published} من ${data.total} حسابات`
+                  : undefined,
             }
           : item
       )
     );
 
-    try {
-      const results: {
-        platform: Platform;
-        success: boolean;
-        data: unknown;
-      }[] = [];
-
-      for (const platform of supportedPlatforms) {
-        const response =
-          await fetch(
-            "/api/meta/publish",
-            {
-              method: "POST",
-
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-
-              body: JSON.stringify({
-                platform,
-                imageUrl: post.image,
-                caption:
-                  post.caption,
-              }),
-            }
-          );
-
-        const data =
-          await response.json();
-
-        results.push({
-          platform,
-          success:
-            response.ok &&
-            data.success === true,
-          data,
-        });
-      }
-
-      const failed =
-        results.filter(
-          (result) =>
-            !result.success
-        );
-
-      if (!failed.length) {
-        setPosts((current) =>
-          current.map((item) =>
-            item.id === post.id
-              ? {
-                  ...item,
-                  status:
-                    "published",
-                }
-              : item
-          )
-        );
-
-        alert(
-          "تم نشر المنشور بنجاح على جميع المنصات المحددة."
-        );
-
-        return;
-      }
-
-      const failedPlatforms =
-        failed
-          .map(
-            (result) =>
-              result.platform
-          )
-          .join(", ");
-
-      const errorMessage =
-        failed
-          .map((result) => {
-            const data =
-              result.data as {
-                error?: unknown;
-              };
-
-            return `${result.platform}: ${
-              typeof data?.error ===
-              "string"
-                ? data.error
-                : JSON.stringify(
-                    data?.error ||
-                      result.data
-                  )
-            }`;
-          })
-          .join("\n");
-
-      setPosts((current) =>
-        current.map((item) =>
-          item.id === post.id
-            ? {
-                ...item,
-                status: "failed",
-                error: errorMessage,
-              }
-            : item
-        )
-      );
-
+    if (data.partialSuccess) {
       alert(
-        `فشل النشر على: ${failedPlatforms}\n\n${errorMessage}`
+        `تم النشر جزئيًا: ${data.published} من ${data.total} حسابات`
       );
-    } catch (error) {
-      console.error(
-        "Publish error:",
-        error
+    } else {
+      alert(
+        `تم نشر المنشور بنجاح على ${data.published} حسابات`
       );
-
-      const message =
-        error instanceof Error
-          ? error.message
-          : "حدث خطأ أثناء النشر";
-
-      setPosts((current) =>
-        current.map((item) =>
-          item.id === post.id
-            ? {
-                ...item,
-                status: "failed",
-                error: message,
-              }
-            : item
-        )
-      );
-
-      alert(message);
-    } finally {
-      setPublishingId(null);
     }
+
+    console.log(
+      "Buffer publish results:",
+      data.results
+    );
+  } catch (error) {
+    console.error(
+      "Publish error:",
+      error
+    );
+
+    setPosts((prev) =>
+      prev.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              status: "failed",
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "فشل نشر المنشور",
+            }
+          : item
+      )
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : "فشل نشر المنشور"
+    );
+  } finally {
+    setPublishingId(null);
   }
+}
 
   /*
    * DELETE
@@ -923,19 +926,18 @@ export default function Dashboard() {
                 uploading ||
                 !image
               }
-              onClick={() => {
-                const draft: Post = {
-                  id: crypto.randomUUID(),
-                  source,
-                  title:
-                    titleFor(source),
-                  caption,
-                  image,
-                  platforms,
-                  status: "draft",
-                  createdAt:
-                    new Date().toISOString(),
-                };
+            onClick={() => {
+              const draft: Post = {
+                id: crypto.randomUUID(),
+                source,
+                title: titleFor(source),
+                caption,
+                image,
+                platforms,
+                channelIds: selectedChannelIds,
+                status: "draft",
+                createdAt: new Date().toISOString(),
+              };
 
                 setPosts((current) => [
                   draft,
