@@ -114,11 +114,10 @@ export default function Dashboard() {
   const [uploadingExternalImage, setUploadingExternalImage] =
     useState(false);
 
-  const [platforms, setPlatforms] =
-    useState<Platform[]>([
-      "Facebook",
-      "Instagram",
-    ]);
+    const [platforms, setPlatforms] =
+      useState<Platform[]>([
+        "TikTok",
+      ]);
 
   const [section, setSection] =
     useState("Dashboard");
@@ -259,12 +258,24 @@ export default function Dashboard() {
         /*
         * Initially select all connected channels.
         */
+        const availableChannels =
+          (data.channels || []).filter(
+            (channel) =>
+              !channel.isDisconnected &&
+              !channel.isLocked
+          );
+
         setSelectedChannelIds(
           (data.channels || [])
             .filter(
               (channel) =>
                 !channel.isDisconnected &&
-                !channel.isLocked
+                !channel.isLocked &&
+                platforms.some(
+                  (platform) =>
+                    channel.service.toLowerCase() ===
+                    platform.toLowerCase()
+                )
             )
             .map((channel) => channel.id)
         );
@@ -981,11 +992,31 @@ async function publishPost(post: Post) {
                 <img
                   src={image}
                   alt="Poster"
+                  style={{
+                    width: "100%",
+                    maxWidth: "420px",
+                    maxHeight: "420px",
+                    height: "auto",
+                    objectFit: "contain",
+                    display: "block",
+                    margin: "0 auto",
+                    borderRadius: "12px",
+                  }}
                 />
               ) : externalImage ? (
                 <img
                   src={externalImage}
                   alt="Uploaded"
+                  style={{
+                    width: "100%",
+                    maxWidth: "420px",
+                    maxHeight: "420px",
+                    height: "auto",
+                    objectFit: "contain",
+                    display: "block",
+                    margin: "0 auto",
+                    borderRadius: "12px",
+                  }}
                 />
               ) : (
                 <span>
