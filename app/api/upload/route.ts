@@ -1,9 +1,9 @@
+
 import { put } from "@vercel/blob";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-
     const image = body?.image;
 
     if (!image || typeof image !== "string") {
@@ -45,18 +45,27 @@ export async function POST(request: Request) {
 
     const buffer = Buffer.from(base64, "base64");
 
+    if (!buffer.length) {
+      return Response.json(
+        {
+          success: false,
+          error: "Image data is empty",
+        },
+        { status: 400 }
+      );
+    }
+
     let extension = "png";
 
     if (contentType === "image/jpeg") {
       extension = "jpg";
-    }
-
-    if (contentType === "image/webp") {
+    } else if (contentType === "image/webp") {
       extension = "webp";
+    } else if (contentType === "image/gif") {
+      extension = "gif";
     }
 
-    const filename =
-      `social/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    const filename = `social/${Date.now()}-${crypto.randomUUID()}.${extension}`;
 
     const blob = await put(filename, buffer, {
       access: "public",
@@ -74,9 +83,13 @@ export async function POST(request: Request) {
     return Response.json(
       {
         success: false,
-        error: "Failed to upload image",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to upload image",
       },
       { status: 500 }
     );
   }
 }
+
