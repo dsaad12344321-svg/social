@@ -222,6 +222,18 @@ export default function Dashboard() {
     setUploadingExternalImage(false);
   }
 }
+
+const availablePlatforms = Array.from(
+  new Set(
+    bufferChannels
+      .filter(
+        (channel) =>
+          !channel.isDisconnected &&
+          !channel.isLocked
+      )
+      .map((channel) => channel.service)
+  )
+);
   
   /*
    * LOAD POSTS AND CHANNELS
@@ -1084,26 +1096,19 @@ async function publishPost(post: Post) {
             </label>
 
             <div className="platforms">
-              {(
-                [
-                  "Facebook",
-                  "Instagram",
-                  "TikTok",
-                  "X",
-                ] as Platform[]
-              ).map((platform) => (
+              {availablePlatforms.map((platform) => (
                 <button
                   key={platform}
                   className={
                     platforms.includes(
-                      platform
+                      platform as Platform
                     )
                       ? "selected"
                       : ""
                   }
                   onClick={() =>
                     togglePlatform(
-                      platform
+                      platform as Platform
                     )
                   }
                 >
