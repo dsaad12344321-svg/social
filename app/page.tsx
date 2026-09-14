@@ -109,6 +109,10 @@ export default function Dashboard() {
 
   const [source, setSource] =
     useState<Source>("certificates");
+  
+  const [externalImage, setExternalImage] = useState("");
+  const [uploadingExternalImage, setUploadingExternalImage] =
+    useState(false);
 
   const [platforms, setPlatforms] =
     useState<Platform[]>([
@@ -133,6 +137,92 @@ export default function Dashboard() {
 
   const [loadingChannels, setLoadingChannels] =
     useState(false);
+  
+  async function handleExternalImageUpload(
+  event: React.ChangeEvent<HTMLInputElement>
+) {
+  const file = event.target.files?.[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    alert("من فضلك اختر صورة فقط");
+    return;
+  }
+
+  setUploadingExternalImage(true);
+
+  try {
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      try {
+        const dataUrl = reader.result;
+
+        if (
+          typeof dataUrl !== "string" ||
+          !dataUrl.startsWith("data:image/")
+        ) {
+          throw new Error("Invalid image");
+        }
+
+        const response = await fetch(
+          "/api/upload",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              image: dataUrl,
+            }),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data?.error ||
+              "فشل رفع الصورة"
+          );
+        }
+
+        setExternalImage(data.url);
+
+        alert("تم رفع الصورة بنجاح");
+        
+        console.log(
+          "External image URL:",
+          data.url
+        );
+      } catch (error) {
+        console.error(
+          "External upload error:",
+          error
+        );
+
+        alert(
+          error instanceof Error
+            ? error.message
+            : "فشل رفع الصورة"
+        );
+      } finally {
+        setUploadingExternalImage(false);
+      }
+    };
+
+    reader.onerror = () => {
+      setUploadingExternalImage(false);
+      alert("فشل قراءة الصورة");
+    };
+
+    reader.readAsDataURL(file);
+  } catch (error) {
+    console.error(error);
+    setUploadingExternalImage(false);
+  }
+}
   
   /*
    * LOAD POSTS AND CHANNELS
@@ -892,11 +982,55 @@ async function publishPost(post: Post) {
                   src={image}
                   alt="Poster"
                 />
+              ) : externalImage ? (
+                <img
+                  src={externalImage}
+                  alt="Uploaded"
+                />
               ) : (
                 <span>
                   سيظهر البوستر هنا بعد
                   إرساله من المنشئ
                 </span>
+              )}
+            </div>
+
+            <div className="external-upload">
+              <label
+                htmlFor="external-image-upload"
+              >
+                {uploadingExternalImage
+                  ? "جاري رفع الصورة..."
+                  : "Upload Image"}
+              </label>
+
+              <input
+                id="external-image-upload"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={
+                  handleExternalImageUpload
+                }
+                disabled={
+                  uploadingExternalImage
+                }
+              />
+
+              {externalImage && (
+                <div>
+                  <p>
+                    تم رفع الصورة بنجاح
+                  </p>
+
+                  <img
+                    src={externalImage}
+                    alt="Uploaded preview"
+                  />
+
+                  <small>
+                    {externalImage}
+                  </small>
+                </div>
               )}
             </div>
 
