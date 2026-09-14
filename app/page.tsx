@@ -1085,20 +1085,21 @@ async function publishPost(post: Post) {
               className="primary"
               disabled={
                 uploading ||
-                !image
+                uploadingExternalImage ||
+                (!image && !externalImage)
               }
-            onClick={() => {
-              const draft: Post = {
-                id: crypto.randomUUID(),
-                source,
-                title: titleFor(source),
-                caption,
-                image,
-                platforms,
-                channelIds: selectedChannelIds,
-                status: "draft",
-                createdAt: new Date().toISOString(),
-              };
+              onClick={() => {
+                const draft: Post = {
+                  id: crypto.randomUUID(),
+                  source,
+                  title: titleFor(source),
+                  caption,
+                  image: externalImage || image,
+                  platforms,
+                  channelIds: selectedChannelIds,
+                  status: "draft",
+                  createdAt: new Date().toISOString(),
+                };
 
                 setPosts((current) => [
                   draft,
@@ -1107,6 +1108,7 @@ async function publishPost(post: Post) {
 
                 setCaption("");
                 setImage("");
+                setExternalImage("");
               }}
             >
               إضافة إلى قائمة النشر
@@ -1116,8 +1118,10 @@ async function publishPost(post: Post) {
               className="secondary"
               disabled={
                 uploading ||
+                uploadingExternalImage ||
                 (!caption.trim() &&
-                  !image)
+                  !image &&
+                  !externalImage)
               }
               onClick={() =>
                 save("draft")
