@@ -1,3 +1,4 @@
+
 type BufferChannel = {
   id: string;
   name: string;
@@ -31,7 +32,7 @@ async function bufferRequest(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + apiKey,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       query,
@@ -42,10 +43,12 @@ async function bufferRequest(
 
   const data = await response.json();
 
+  console.log("Buffer response:", JSON.stringify(data));
+
   if (!response.ok) {
     throw new Error(
       data?.errors?.[0]?.message ||
-        "Buffer request failed"
+        `Buffer HTTP error ${response.status}`
     );
   }
 
@@ -54,17 +57,19 @@ async function bufferRequest(
     data.errors.length > 0
   ) {
     throw new Error(
-      data.errors[0]?.message ||
-        "Buffer GraphQL error"
+      data.errors
+        .map(
+          (error: { message?: string }) =>
+            error?.message || "Buffer GraphQL error"
+        )
+        .join(" | ")
     );
   }
 
   return data?.data;
 }
 
-async function getChannels(
-  apiKey: string
-) {
+async function getChannels(apiKey: string) {
   const organizationsData =
     await bufferRequest(
       apiKey,
@@ -107,8 +112,7 @@ async function getChannels(
           }
         `,
         {
-          organizationId:
-            organization.id,
+          organizationId: organization.id,
         }
       );
 
@@ -141,6 +145,12 @@ async function publishToChannel(
           __typename
           post {
             id
+            text
+            status
+            assets {
+              id
+              mimeType
+            }
           }
         }
 
@@ -211,6 +221,17 @@ export async function POST(
       );
     }
 
+    if (!imageUrl.startsWith("https://")) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "imageUrl must be a public HTTPS URL",
+        },
+        { status: 400 }
+      );
+    }
+
     if (!caption) {
       return Response.json(
         {
@@ -264,6 +285,8 @@ export async function POST(
 
     const results: PublishResult[] = [];
 
+    const foundChannelIds = new Set<string>();
+
     for (const item of configuredKeys) {
       let channels: BufferChannel[] = [];
 
@@ -271,11 +294,31 @@ export async function POST(
         channels = await getChannels(
           item.key
         );
+
+        console.log(
+          `Buffer account ${item.account} channels:`,
+          channels.map((channel) => ({
+            id: channel.id,
+            name:
+              channel.displayName ||
+              channel.name,
+            service: channel.service,
+          }))
+        );
       } catch (error) {
         console.error(
           `Buffer account ${item.account} channels error:`,
           error
         );
+
+        results.push({
+          channelId: `account-${item.account}`,
+          success: false,
+          error:
+            error instanceof Error
+              ? `Account ${item.account}: ${error.message}`
+              : `Account ${item.account}: Failed to load channels`,
+        });
 
         continue;
       }
@@ -286,7 +329,21 @@ export async function POST(
         );
 
       for (const channel of selectedChannels) {
+        foundChannelIds.add(channel.id);
+
         try {
+          console.log(
+            "Publishing to Buffer channel:",
+            {
+              channelId: channel.id,
+              channelName:
+                channel.displayName ||
+                channel.name,
+              service: channel.service,
+              imageUrl,
+            }
+          );
+
           const data =
             await publishToChannel(
               item.key,
@@ -297,6 +354,11 @@ export async function POST(
 
           const action =
             data?.createPost;
+
+          console.log(
+            "Buffer createPost result:",
+            JSON.stringify(action)
+          );
 
           if (
             action?.__typename ===
@@ -322,7 +384,7 @@ export async function POST(
                 channel.name,
               error:
                 action?.message ||
-                "Buffer failed to create the post",
+                "Buffer did not return a successful post result",
             });
           }
         } catch (error) {
@@ -342,6 +404,21 @@ export async function POST(
       }
     }
 
+    /*
+     * Detect channel IDs that were sent by the dashboard
+     * but are no longer available through either Buffer API key.
+     */
+    for (const channelId of channelIds) {
+      if (!foundChannelIds.has(channelId)) {
+        results.push({
+          channelId,
+          success: false,
+          error:
+            "This channel ID was not found in either Buffer account. Refresh Buffer channels and select the account again.",
+        });
+      }
+    }
+
     const published = results.filter(
       (result) => result.success
     ).length;
@@ -350,17 +427,25 @@ export async function POST(
       (result) => !result.success
     ).length;
 
+    const success =
+      published > 0 && failed === 0;
+
+    const partialSuccess =
+      published > 0 && failed > 0;
+
     return Response.json({
-      success:
-        published > 0 &&
-        failed === 0,
-      partialSuccess:
-        published > 0 &&
-        failed > 0,
+      success,
+      partialSuccess,
       total: channelIds.length,
       published,
       failed,
       results,
+      debug: {
+        imageUrl,
+        selectedChannelIds: channelIds,
+        foundChannelIds:
+          Array.from(foundChannelIds),
+      },
     });
   } catch (error) {
     console.error(
@@ -380,3 +465,4 @@ export async function POST(
     );
   }
 }
+

@@ -308,10 +308,7 @@ export default function Dashboard() {
 
             image: uploadData.url,
 
-            platforms: [
-              "Facebook",
-              "Instagram",
-            ],
+            platforms: platforms,
 
             channelIds: selectedChannelIds,
 
@@ -349,10 +346,7 @@ export default function Dashboard() {
 
             image: "",
 
-            platforms: [
-              "Facebook",
-              "Instagram",
-            ],
+            platforms: platforms,
 
             channelIds: selectedChannelIds,
 
@@ -401,10 +395,7 @@ export default function Dashboard() {
 
         image: "",
 
-        platforms: [
-          "Facebook",
-          "Instagram",
-        ],
+        platforms: platforms,
 
         channelIds: selectedChannelIds,
 
@@ -430,7 +421,7 @@ export default function Dashboard() {
         "message",
         onMessage
       );
-  }, []);
+  }, [selectedChannelIds, platforms]);
 
   /*
    * STATS
@@ -475,17 +466,53 @@ export default function Dashboard() {
   /*
    * PLATFORM TOGGLE
    */
-  function togglePlatform(
-    platform: Platform
-  ) {
-    setPlatforms((current) =>
-      current.includes(platform)
-        ? current.filter(
-            (item) => item !== platform
-          )
-        : [...current, platform]
+function togglePlatform(
+  platform: Platform
+) {
+  const willSelect =
+    !platforms.includes(platform);
+
+  setPlatforms((current) =>
+    willSelect
+      ? [...current, platform]
+      : current.filter(
+          (item) => item !== platform
+        )
+  );
+
+  const matchingChannels =
+    bufferChannels.filter(
+      (channel) =>
+        channel.service.toLowerCase() ===
+          platform.toLowerCase() &&
+        !channel.isDisconnected &&
+        !channel.isLocked
     );
-  }
+
+  setSelectedChannelIds((current) => {
+    if (willSelect) {
+      const newIds =
+        matchingChannels
+          .map((channel) => channel.id)
+          .filter(
+            (id) => !current.includes(id)
+          );
+
+      return [...current, ...newIds];
+    }
+
+    const removeIds =
+      new Set(
+        matchingChannels.map(
+          (channel) => channel.id
+        )
+      );
+
+    return current.filter(
+      (id) => !removeIds.has(id)
+    );
+  });
+}
 
   /*
    * SAVE MANUAL POST
