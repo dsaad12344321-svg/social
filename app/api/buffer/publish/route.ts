@@ -1,3 +1,6 @@
+
+import { NextResponse } from "next/server";
+
 const BUFFER_API_URL = "https://api.buffer.com";
 
 type BufferChannel = {
@@ -17,16 +20,105 @@ type BufferChannel = {
   ownerEmail?: string;
 };
 
-type BufferAccountError = {
-  account: number;
-  error: string;
+type BufferGraphQLResponse<T = any> = {
+  data?: T;
+  errors?: Array<{
+    message: string;
+    locations?: unknown;
+    path?: unknown;
+  }>;
 };
 
-async function bufferRequest(
+type Source = "certificates" | "deposits" | "treasury";
+
+function normalizeService(service: string): string {
+  const value = service.trim().toLowerCase();
+
+  if (value === "twitter" || value === "x") {
+    return "x";
+  }
+
+  return value;
+}
+
+/**
+ * Creates a YouTube title automatically.
+ *
+ * The dashboard does not expose a title field.
+ * The title is selected automatically from this list.
+ */
+function getYoutubeTitle(
+  source: Source,
+  caption: string
+): string {
+  const bankNames = [
+    "بنك مصر",
+    "البنك الأهلي المصري",
+    "البنك الأهلي",
+    "بنك القاهرة",
+    "بنك CIB",
+    "CIB",
+    "بنك QNB",
+    "QNB",
+    "بنك الإسكندرية",
+    "بنك SAIB",
+    "بنك فيصل الإسلامي",
+    "بنك البركة",
+    "بنك التعمير والإسكان",
+    "بنك أبو ظبي الإسلامي",
+    "مصرف أبو ظبي الإسلامي",
+  ];
+
+  const detectedBank = bankNames.find((bank) =>
+    caption.includes(bank)
+  );
+
+  if (source === "certificates") {
+    const titles = detectedBank
+      ? [
+          `آخر تحديث لشهادات ${detectedBank}`,
+          `أحدث شهادات ${detectedBank}`,
+          `شهادات ${detectedBank} - آخر تحديث`,
+        ]
+      : [
+          "آخر تحديث لشهادات البنوك المصرية",
+          "أحدث شهادات الادخار في البنوك المصرية",
+          "شهادات البنوك المصرية - آخر تحديث",
+        ];
+
+    return titles[Math.floor(Math.random() * titles.length)];
+  }
+
+  if (source === "deposits") {
+    const titles = detectedBank
+      ? [
+          `آخر تحديث لودائع ${detectedBank}`,
+          `أحدث ودائع ${detectedBank}`,
+          `ودائع ${detectedBank} - آخر تحديث`,
+        ]
+      : [
+          "آخر تحديث لودائع البنوك المصرية",
+          "أحدث ودائع البنوك المصرية",
+          "ودائع البنوك المصرية - آخر تحديث",
+        ];
+
+    return titles[Math.floor(Math.random() * titles.length)];
+  }
+
+  const titles = [
+    "العروض المقبولة لأذون الخزانة",
+    "آخر تحديث لأذون الخزانة المصرية",
+    "أحدث أسعار وعروض أذون الخزانة",
+  ];
+
+  return titles[Math.floor(Math.random() * titles.length)];
+}
+
+async function bufferRequest<T = any>(
   apiKey: string,
   query: string,
   variables?: Record<string, unknown>
-) {
+): Promise<BufferGraphQLResponse<T>> {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
     headers: {
@@ -37,44 +129,34 @@ async function bufferRequest(
       query,
       variables,
     }),
-    cache: "no-store",
   });
 
-  const responseText = await response.text();
+  const raw = await response.text();
 
-  let data: any;
+  let data: BufferGraphQLResponse<T>;
 
   try {
-    data = JSON.parse(responseText);
+    data = JSON.parse(raw);
   } catch {
-    data = {
-      rawText: responseText,
-    };
+    throw new Error(
+      `Buffer returned invalid JSON (${response.status}): ${raw.slice(
+        0,
+        500
+      )}`
+    );
   }
 
-  console.log(
-    "BUFFER RAW RESPONSE:",
-    JSON.stringify(data, null, 2)
-  );
+  console.log("Buffer response:", JSON.stringify(data, null, 2));
 
-  return {
-    httpStatus: response.status,
-    data,
-  };
+  return data;
 }
 
 async function getChannels(
   apiKey: string,
   account: number
-): Promise<{
-  channels: BufferChannel[];
-  errors: BufferAccountError[];
-}> {
-  const channels: BufferChannel[] = [];
-  const errors: BufferAccountError[] = [];
-
+): Promise<BufferChannel[]> {
   const organizationsQuery = `
-    query {
+    query GetOrganizations {
       account {
         organizations {
           id
@@ -84,44 +166,33 @@ async function getChannels(
     }
   `;
 
-  const organizationsResult = await bufferRequest(
-    apiKey,
-    organizationsQuery
-  );
+  const organizationsResponse =
+    await bufferRequest<{
+      account?: {
+        organizations?: Array<{
+          id: string;
+          name: string;
+        }>;
+      };
+    }>(apiKey, organizationsQuery);
 
-  if (
-    organizationsResult.data?.errors?.length
-  ) {
-    errors.push({
-      account,
-      error:
-        organizationsResult.data.errors
-          .map(
-            (error: any) =>
-              error?.message ||
-              "Failed to load Buffer organizations"
-          )
-          .join("; "),
-    });
-
-    return {
-      channels,
-      errors,
-    };
+  if (organizationsResponse.errors?.length) {
+    throw new Error(
+      organizationsResponse.errors
+        .map((error) => error.message)
+        .join("; ")
+    );
   }
 
   const organizations =
-    organizationsResult.data?.data?.account
-      ?.organizations || [];
+    organizationsResponse.data?.account?.organizations ?? [];
+
+  const allChannels: BufferChannel[] = [];
 
   for (const organization of organizations) {
     const channelsQuery = `
       query GetChannels($organizationId: OrganizationId!) {
-        channels(
-            input: {
-              organizationId: $organizationId
-            }
-) {
+        channels(input: { organizationId: $organizationId }) {
           id
           name
           displayName
@@ -136,241 +207,338 @@ async function getChannels(
       }
     `;
 
-    const result = await bufferRequest(
-      apiKey,
-      channelsQuery,
-      {
-        organizationId: organization.id,
-      }
-    );
+    const response = await bufferRequest<{
+      channels?: Array<{
+        id: string;
+        name: string;
+        displayName?: string | null;
+        descriptor?: string | null;
+        externalLink?: string | null;
+        service: string;
+        avatar?: string | null;
+        isQueuePaused?: boolean;
+        isDisconnected?: boolean;
+        isLocked?: boolean;
+      }>;
+    }>(apiKey, channelsQuery, {
+      organizationId: organization.id,
+    });
 
-    if (result.data?.errors?.length) {
-      errors.push({
-        account,
-        error:
-          result.data.errors
-            .map(
-              (error: any) =>
-                error?.message ||
-                "Failed to load Buffer channels"
-            )
-            .join("; "),
-      });
-
+    if (response.errors?.length) {
+      console.error(
+        `Buffer channels error for account ${account}, organization ${organization.id}:`,
+        response.errors
+      );
       continue;
     }
 
-    const organizationChannels =
-      result.data?.data?.channels || [];
+    const channels = response.data?.channels ?? [];
 
-    for (const channel of organizationChannels) {
-      channels.push({
+    for (const channel of channels) {
+      allChannels.push({
         ...channel,
         account,
-        organizationId:
-          organization.id,
-        organizationName:
-          organization.name,
+        organizationId: organization.id,
+        organizationName: organization.name,
       });
     }
   }
 
-  return {
-    channels,
-    errors,
-  };
+  return allChannels;
 }
 
-export async function POST(
-  request: Request
+function isYoutubeChannel(channel: BufferChannel): boolean {
+  return normalizeService(channel.service) === "youtube";
+}
+
+function isImagePlatform(channel: BufferChannel): boolean {
+  const service = normalizeService(channel.service);
+
+  return [
+    "facebook",
+    "instagram",
+    "tiktok",
+    "twitter",
+    "x",
+    "linkedin",
+    "pinterest",
+  ].includes(service);
+}
+
+async function createImagePost(
+  apiKey: string,
+  channelId: string,
+  caption: string,
+  imageUrl: string
 ) {
+  const mutation = `
+    mutation CreateImagePost(
+      $channelId: ChannelId!,
+      $text: String!,
+      $imageUrl: String!
+    ) {
+      createPost(
+        input: {
+          channelId: $channelId
+          text: $text
+          schedulingType: automatic
+          mode: shareNow
+          assets: [
+            {
+              image: {
+                url: $imageUrl
+              }
+            }
+          ]
+        }
+      ) {
+        ... on PostActionSuccess {
+          post {
+            id
+            text
+            status
+            assets {
+              id
+              mimeType
+            }
+          }
+        }
+
+        ... on MutationError {
+          message
+        }
+      }
+    }
+  `;
+
+  return bufferRequest(apiKey, mutation, {
+    channelId,
+    text: caption,
+    imageUrl,
+  });
+}
+
+async function createYoutubePost(
+  apiKey: string,
+  channelId: string,
+  caption: string,
+  videoUrl: string,
+  youtubeTitle: string
+) {
+  const mutation = `
+    mutation CreateYoutubePost(
+      $channelId: ChannelId!,
+      $text: String!,
+      $videoUrl: String!,
+      $youtubeTitle: String!,
+      $categoryId: String!
+    ) {
+      createPost(
+        input: {
+          channelId: $channelId
+          text: $text
+          schedulingType: automatic
+          mode: shareNow
+
+          assets: [
+            {
+              video: {
+                url: $videoUrl
+              }
+            }
+          ]
+
+          metadata: {
+            youtube: {
+              title: $youtubeTitle
+              categoryId: $categoryId
+            }
+          }
+        }
+      ) {
+        ... on PostActionSuccess {
+          post {
+            id
+            text
+            status
+            assets {
+              id
+              mimeType
+            }
+          }
+        }
+
+        ... on MutationError {
+          message
+        }
+      }
+    }
+  `;
+
+  return bufferRequest(apiKey, mutation, {
+    channelId,
+    text: caption,
+    videoUrl,
+    youtubeTitle,
+    categoryId: "27",
+  });
+}
+
+export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    const imageUrl = body?.imageUrl;
-    const caption = body?.caption;
-    const channelIds = body?.channelIds;
+    const imageUrl =
+      typeof body?.imageUrl === "string"
+        ? body.imageUrl.trim()
+        : "";
 
-    if (
-      !imageUrl ||
-      typeof imageUrl !== "string"
-    ) {
-      return Response.json(
+    const videoUrl =
+      typeof body?.videoUrl === "string"
+        ? body.videoUrl.trim()
+        : "";
+
+    const caption =
+      typeof body?.caption === "string"
+        ? body.caption.trim()
+        : "";
+
+    const source: Source =
+      body?.source === "deposits"
+        ? "deposits"
+        : body?.source === "treasury"
+        ? "treasury"
+        : "certificates";
+
+    const requestedChannelIds = Array.isArray(body?.channelIds)
+      ? body.channelIds.filter(
+          (id: unknown): id is string =>
+            typeof id === "string" && id.trim().length > 0
+        )
+      : [];
+
+    // Remove duplicate channel IDs.
+    const channelIds = Array.from(
+      new Set(requestedChannelIds)
+    );
+
+    if (!caption) {
+      return NextResponse.json(
         {
           success: false,
-          error: "imageUrl is required",
+          error: "Caption is required",
         },
         { status: 400 }
       );
     }
 
-    if (
-      !imageUrl.startsWith("https://")
-    ) {
-      return Response.json(
+    if (!channelIds.length) {
+      return NextResponse.json(
         {
           success: false,
-          error:
-            "imageUrl must be a public HTTPS URL",
+          error: "At least one channel is required",
         },
         { status: 400 }
       );
     }
 
-    if (
-      !caption ||
-      typeof caption !== "string" ||
-      !caption.trim()
-    ) {
-      return Response.json(
+    if (!imageUrl && !videoUrl) {
+      return NextResponse.json(
         {
           success: false,
-          error: "caption is required",
+          error: "Image or video is required",
         },
         { status: 400 }
       );
     }
 
-    if (
-      !Array.isArray(channelIds) ||
-      channelIds.length === 0
-    ) {
-      return Response.json(
+    const apiKeys = [
+      process.env.BUFFER_API_KEY_1,
+      process.env.BUFFER_API_KEY_2,
+    ].filter(
+      (value): value is string =>
+        typeof value === "string" && value.trim().length > 0
+    );
+
+    if (!apiKeys.length) {
+      return NextResponse.json(
         {
           success: false,
-          error:
-            "At least one Buffer channel is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    const apiKey1 =
-      process.env.BUFFER_API_KEY_1;
-
-    const apiKey2 =
-      process.env.BUFFER_API_KEY_2;
-
-    if (!apiKey1 && !apiKey2) {
-      return Response.json(
-        {
-          success: false,
-          error:
-            "No Buffer API keys configured",
+          error: "No Buffer API keys configured",
         },
         { status: 500 }
       );
     }
 
-    const allChannels: BufferChannel[] =
-      [];
+    // Load channels from all configured Buffer accounts.
+    const channelLists = await Promise.all(
+      apiKeys.map((apiKey, index) =>
+        getChannels(apiKey, index + 1).catch((error) => {
+          console.error(
+            `Failed to load Buffer channels for account ${index + 1}:`,
+            error
+          );
 
-    const accountErrors: BufferAccountError[] =
-      [];
+          return [] as BufferChannel[];
+        })
+      )
+    );
 
-    if (apiKey1) {
-      const result = await getChannels(
-        apiKey1,
-        1
+    const allChannels = channelLists.flat();
+
+    const selectedChannels = channelIds
+      .map((channelId) =>
+        allChannels.find((channel) => channel.id === channelId)
+      )
+      .filter(
+        (channel): channel is BufferChannel =>
+          Boolean(channel)
       );
 
-      allChannels.push(
-        ...result.channels
-      );
-
-      accountErrors.push(
-        ...result.errors
-      );
-    }
-
-    if (apiKey2) {
-      const result = await getChannels(
-        apiKey2,
-        2
-      );
-
-      allChannels.push(
-        ...result.channels
-      );
-
-      accountErrors.push(
-        ...result.errors
-      );
-    }
-
-    const selectedChannels =
-      allChannels.filter((channel) =>
-        channelIds.includes(channel.id)
-      );
-
-    const missingChannelIds =
-      channelIds.filter(
-        (id: string) =>
-          !selectedChannels.some(
-            (channel) =>
-              channel.id === id
-          )
-      );
-
-    if (missingChannelIds.length > 0) {
-      return Response.json(
+    if (!selectedChannels.length) {
+      return NextResponse.json(
         {
           success: false,
-          error:
-            "Some Buffer channels were not found",
-
-          missingChannelIds,
-
-          availableChannels:
-            allChannels.map((channel) => ({
+          error: "No matching Buffer channels were found",
+          debug: {
+            requestedChannelIds: channelIds,
+            availableChannels: allChannels.map((channel) => ({
               id: channel.id,
               name: channel.name,
-              displayName:
-                channel.displayName,
-              descriptor:
-                channel.descriptor,
-              externalLink:
-                channel.externalLink,
-              service:
-                channel.service,
-              account:
-                channel.account,
-              organizationName:
-                channel.organizationName,
-              isDisconnected:
-                channel.isDisconnected,
-              isLocked:
-                channel.isLocked,
+              displayName: channel.displayName,
+              service: channel.service,
+              account: channel.account,
+              isDisconnected: channel.isDisconnected,
+              isLocked: channel.isLocked,
             })),
-
-          accountErrors,
+          },
         },
-        { status: 404 }
+        { status: 400 }
       );
     }
 
-    const results: any[] = [];
+    const results: Array<{
+      channelId: string;
+      channelName: string;
+      service: string;
+      account: number;
+      success: boolean;
+      postId?: string;
+      status?: string;
+      error?: string;
+      youtubeTitle?: string;
+      youtubeCategory?: string;
+    }> = [];
 
     for (const channel of selectedChannels) {
       if (channel.isDisconnected) {
         results.push({
           channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          descriptor:
-            channel.descriptor,
-          externalLink:
-            channel.externalLink,
-          service:
-            channel.service,
-          account:
-            channel.account,
-          organizationName:
-            channel.organizationName,
+          channelName: channel.name,
+          service: channel.service,
+          account: channel.account,
           success: false,
-          error:
-            "Buffer channel is disconnected",
+          error: "Channel is disconnected",
         });
 
         continue;
@@ -379,362 +547,239 @@ export async function POST(
       if (channel.isLocked) {
         results.push({
           channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          descriptor:
-            channel.descriptor,
-          externalLink:
-            channel.externalLink,
-          service:
-            channel.service,
-          account:
-            channel.account,
-          organizationName:
-            channel.organizationName,
+          channelName: channel.name,
+          service: channel.service,
+          account: channel.account,
           success: false,
-          error:
-            "Buffer channel is locked",
+          error: "Channel is locked",
         });
 
         continue;
       }
 
-      const apiKey =
-        channel.account === 1
-          ? apiKey1
-          : apiKey2;
+      const apiKey = apiKeys[channel.account - 1];
 
       if (!apiKey) {
         results.push({
           channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          descriptor:
-            channel.descriptor,
-          externalLink:
-            channel.externalLink,
-          service:
-            channel.service,
-          account:
-            channel.account,
-          organizationName:
-            channel.organizationName,
+          channelName: channel.name,
+          service: channel.service,
+          account: channel.account,
           success: false,
-          error:
-            `Missing Buffer API key for account ${channel.account}`,
+          error: `No API key configured for Buffer account ${channel.account}`,
         });
 
         continue;
       }
 
-      const mutation = `
-        mutation CreatePost(
-          $channelId: ChannelId!,
-          $text: String!,
-          $imageUrl: String!
-        ) {
-          createPost(
-            input: {
-              channelId: $channelId
-              text: $text
-              schedulingType: automatic
-              mode: shareNow
-              assets: [
-                {
-                  image: {
-                    url: $imageUrl
-                  }
-                }
-              ]
-            }
-          ) {
-            ... on PostActionSuccess {
-              post {
-                id
-                text
-                status
-                assets {
-                  id
-                  mimeType
-                }
-              }
-            }
+      try {
+        let response: BufferGraphQLResponse;
 
-            ... on MutationError {
-              message
-            }
+        if (isYoutubeChannel(channel)) {
+          if (!videoUrl) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: "YouTube requires a video",
+            });
+
+            continue;
           }
+
+          const youtubeTitle = getYoutubeTitle(
+            source,
+            caption
+          );
+
+          response = await createYoutubePost(
+            apiKey,
+            channel.id,
+            caption,
+            videoUrl,
+            youtubeTitle
+          );
+
+          if (response.errors?.length) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: response.errors
+                .map((error) => error.message)
+                .join("; "),
+            });
+
+            continue;
+          }
+
+          const payload = response.data?.createPost;
+
+          if (payload?.message) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: payload.message,
+            });
+
+            continue;
+          }
+
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: true,
+            postId: payload?.post?.id,
+            status: payload?.post?.status,
+            youtubeTitle,
+            youtubeCategory: "Education",
+          });
+
+          continue;
         }
-      `;
 
-      const result = await bufferRequest(
-        apiKey,
-        mutation,
-        {
-          channelId: channel.id,
-          text: caption.trim(),
-          imageUrl,
+        if (!imageUrl) {
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: false,
+            error: "This platform requires an image",
+          });
+
+          continue;
         }
-      );
 
-      const createPost =
-        result.data?.data?.createPost;
+        if (!isImagePlatform(channel)) {
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: false,
+            error: `Unsupported Buffer service: ${channel.service}`,
+          });
 
-      /*
-       * SUCCESS
-       */
-      if (createPost?.post?.id) {
+          continue;
+        }
+
+        response = await createImagePost(
+          apiKey,
+          channel.id,
+          caption,
+          imageUrl
+        );
+
+        if (response.errors?.length) {
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: false,
+            error: response.errors
+              .map((error) => error.message)
+              .join("; "),
+          });
+
+          continue;
+        }
+
+        const payload = response.data?.createPost;
+
+        if (payload?.message) {
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: false,
+            error: payload.message,
+          });
+
+          continue;
+        }
+
         results.push({
           channelId: channel.id,
-          channelName:
-            channel.displayName ||
-            channel.name,
-          descriptor:
-            channel.descriptor,
-          externalLink:
-            channel.externalLink,
-          service:
-            channel.service,
-          account:
-            channel.account,
-          organizationName:
-            channel.organizationName,
+          channelName: channel.name,
+          service: channel.service,
+          account: channel.account,
           success: true,
-          postId:
-            createPost.post.id,
-          status:
-            createPost.post.status,
+          postId: payload?.post?.id,
+          status: payload?.post?.status,
         });
-
-        continue;
+      } catch (error) {
+        results.push({
+          channelId: channel.id,
+          channelName: channel.name,
+          service: channel.service,
+          account: channel.account,
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown publishing error",
+        });
       }
-
-      /*
-       * REAL BUFFER / GRAPHQL ERROR
-       */
-
-      const graphqlErrors =
-        Array.isArray(
-          result.data?.errors
-        )
-          ? result.data.errors.map(
-              (error: any) => ({
-                message:
-                  error?.message ||
-                  null,
-                path:
-                  error?.path ||
-                  null,
-                extensions:
-                  error?.extensions ||
-                  null,
-              })
-            )
-          : [];
-
-      const mutationError =
-        createPost?.message ||
-        null;
-
-      const rawApiMessage =
-        mutationError ||
-        graphqlErrors
-          .map(
-            (error: any) =>
-              error.message
-          )
-          .filter(Boolean)
-          .join("; ") ||
-        result.data?.message ||
-        result.data?.error ||
-        result.data?.rawText ||
-        null;
-
-      const errorMessage =
-        rawApiMessage ||
-        `Buffer API returned HTTP ${result.httpStatus}`;
-
-      console.error(
-        "========================================"
-      );
-
-      console.error(
-        "BUFFER ORIGINAL API ERROR"
-      );
-
-      console.error(
-        JSON.stringify(
-          {
-            channelId:
-              channel.id,
-            channelName:
-              channel.displayName ||
-              channel.name,
-            service:
-              channel.service,
-            account:
-              channel.account,
-            organization:
-              channel.organizationName,
-            httpStatus:
-              result.httpStatus,
-            mutationError,
-            graphqlErrors,
-            rawResponse:
-              result.data,
-          },
-          null,
-          2
-        )
-      );
-
-      console.error(
-        "========================================"
-      );
-
-      results.push({
-        channelId: channel.id,
-
-        channelName:
-          channel.displayName ||
-          channel.name,
-
-        descriptor:
-          channel.descriptor,
-
-        externalLink:
-          channel.externalLink,
-
-        service:
-          channel.service,
-
-        account:
-          channel.account,
-
-        organizationName:
-          channel.organizationName,
-
-        success: false,
-
-        /*
-         * THIS IS THE ORIGINAL ERROR
-         * RECEIVED FROM BUFFER
-         */
-        error: errorMessage,
-
-        /*
-         * HTTP STATUS FROM BUFFER
-         */
-        httpStatus:
-          result.httpStatus,
-
-        /*
-         * GRAPHQL ERRORS
-         */
-        graphqlErrors,
-
-        /*
-         * MUTATION ERROR
-         */
-        mutationError,
-
-        /*
-         * COMPLETE RAW BUFFER RESPONSE
-         */
-        bufferResponse:
-          result.data,
-      });
     }
 
-    const published =
-      results.filter(
-        (result) =>
-          result.success
-      ).length;
+    const published = results.filter(
+      (result) => result.success
+    );
 
-    const failed =
-      results.filter(
-        (result) =>
-          !result.success
-      ).length;
+    const failed = results.filter(
+      (result) => !result.success
+    );
 
-    return Response.json({
+    return NextResponse.json({
       success:
-        published > 0 &&
-        failed === 0,
-
+        published.length > 0 && failed.length === 0,
       partialSuccess:
-        published > 0 &&
-        failed > 0,
-
-      published,
-      failed,
+        published.length > 0 && failed.length > 0,
+      published: published.length,
+      failed: failed.length,
       total: results.length,
-
       results,
-
       debug: {
-        imageUrl,
-
-        requestedChannelIds:
-          channelIds,
-
-        selectedChannels:
-          selectedChannels.map(
-            (channel) => ({
-              id: channel.id,
-              name: channel.name,
-              displayName:
-                channel.displayName,
-              descriptor:
-                channel.descriptor,
-              externalLink:
-                channel.externalLink,
-              service:
-                channel.service,
-              account:
-                channel.account,
-              organizationName:
-                channel.organizationName,
-              isDisconnected:
-                channel.isDisconnected,
-              isLocked:
-                channel.isLocked,
-            })
-          ),
-
-        accountErrors,
+        requestedChannelIds: channelIds,
+        selectedChannels: selectedChannels.map(
+          (channel) => ({
+            id: channel.id,
+            name: channel.name,
+            displayName: channel.displayName,
+            service: channel.service,
+            account: channel.account,
+            organizationId: channel.organizationId,
+            organizationName:
+              channel.organizationName,
+          })
+        ),
       },
     });
   } catch (error) {
-    console.error(
-      "BUFFER PUBLISH SERVER ERROR:",
-      error
-    );
+    console.error("Buffer publish error:", error);
 
-    return Response.json(
+    return NextResponse.json(
       {
         success: false,
-
         error:
           error instanceof Error
             ? error.message
             : "Failed to publish through Buffer",
-
-        serverError:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message:
-                  error.message,
-                stack:
-                  error.stack,
-              }
-            : error,
       },
       { status: 500 }
     );
   }
 }
+

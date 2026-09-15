@@ -2,1191 +2,916 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Source =
-  | "certificates"
-  | "deposits"
-  | "treasury";
+type Source = "certificates" | "deposits" | "treasury";
 
 type Platform =
-  | "Facebook"
-  | "Instagram"
-  | "TikTok"
-  | "X";
+| "Facebook"
+| "Instagram"
+| "TikTok"
+| "X"
+| "YouTube";
 
 type BufferChannel = {
-  id: string;
-  name: string;
-  displayName?: string | null;
-  service: string;
-  avatar?: string | null;
-  isQueuePaused?: boolean;
-  isDisconnected?: boolean;
-  isLocked?: boolean;
-  account: number;
-  organizationId: string;
-  organizationName: string;
-  ownerEmail?: string;
+id: string;
+name: string;
+displayName?: string | null;
+service: string;
+avatar?: string | null;
+isQueuePaused?: boolean;
+isDisconnected?: boolean;
+isLocked?: boolean;
+account: number;
+organizationId: string;
+organizationName: string;
+ownerEmail?: string;
 };
 
 type BufferChannelsResponse = {
-  success: boolean;
-  channels: BufferChannel[];
-  errors?: Array<{
-    account: number;
-    error: string;
-  }>;
+success: boolean;
+channels: BufferChannel[];
+errors?: Array<{
+account: number;
+error: string;
+}>;
 };
 
-type Status =
-  | "draft"
-  | "scheduled"
-  | "published"
-  | "failed";
+type Status = "draft" | "scheduled" | "published" | "failed";
+
+type MediaType = "image" | "video";
 
 type Post = {
-  id: string;
-  source: Source;
-  title: string;
-  caption: string;
-  image: string;
-  platforms: Platform[];
-  channelIds: string[];
-  status: Status;
-  createdAt: string;
-  error?: string;
+id: string;
+source: Source;
+title: string;
+caption: string;
+media: string;
+mediaType: MediaType;
+platforms: Platform[];
+channelIds: string[];
+status: Status;
+createdAt: string;
+error?: string;
 };
 
-const STORAGE =
-  "daleelak-social-posts-v2";
+const STORAGE = "daleelak-social-posts-v3";
 
-const BANKS_URL =
-  "https://daleelakelbanky.vercel.app";
+const BANKS_URL = "https://daleelakelbanky.vercel.app";
 
 const generators: Record<
-  Source,
-  {
-    label: string;
-    path: string;
-  }
-> = {
-  certificates: {
-    label: "منشئ الشهادات",
-    path: "/certificates-poster",
-  },
-
-  deposits: {
-    label: "منشئ الودائع",
-    path: "/deposits-poster",
-  },
-
-  treasury: {
-    label: "منشئ أذون الخزانة",
-    path: "/treasury-bills-poster",
-  },
+Source,
+{
+label: string;
+path: string;
+}
+>
+= {
+certificates: {
+label: "منشئ الشهادات",
+path: "/certificates-poster",
+},
+deposits: {
+label: "منشئ الودائع",
+path: "/deposits-poster",
+},
+treasury: {
+label: "منشئ أذون الخزانة",
+path: "/treasury-bills-poster",
+},
 };
 
 function titleFor(source: Source) {
-  if (source === "certificates") {
-    return "شهادات البنوك المصرية";
-  }
+if (source === "certificates") {
+return "شهادات البنوك المصرية";
+}
 
-  if (source === "deposits") {
-    return "ودائع البنوك المصرية";
-  }
+if (source === "deposits") {
+return "ودائع البنوك المصرية";
+}
 
-  return "أذون الخزانة المصرية";
+return "أذون الخزانة المصرية";
+}
+
+function normalizePlatform(service: string): Platform | null {
+const value = service.toLowerCase().trim();
+
+if (value === "facebook") {
+return "Facebook";
+}
+
+if (value === "instagram") {
+return "Instagram";
+}
+
+if (value === "tiktok") {
+return "TikTok";
+}
+
+if (value === "twitter" || value === "x") {
+return "X";
+}
+
+if (value === "youtube") {
+return "YouTube";
+}
+
+return null;
 }
 
 export default function Dashboard() {
-  const [posts, setPosts] =
-    useState<Post[]>([]);
+const [posts, setPosts] = useState<Post[]>([]);
+const [caption, setCaption] = useState("");
+const [media, setMedia] = useState("");
+const [mediaType, setMediaType] = useState<MediaType>("image");
+const [source, setSource] = useState<Source>("certificates");
 
-  const [caption, setCaption] =
-    useState("");
+const [uploadingMedia, setUploadingMedia] = useState(false);
 
-  const [image, setImage] =
-    useState("");
+const [platforms, setPlatforms] = useState<Platform[]>([
+"Facebook",
+]);
 
-  const [source, setSource] =
-    useState<Source>("certificates");
-  
-  const [externalImage, setExternalImage] = useState("");
-  const [uploadingExternalImage, setUploadingExternalImage] =
-    useState(false);
+const [section, setSection] = useState("Dashboard");
+const [uploading, setUploading] = useState(false);
+const [publishingId, setPublishingId] = useState<string | null>(null);
 
-    const [platforms, setPlatforms] =
-      useState<Platform[]>([
-        "TikTok",
-      ]);
-
-  const [section, setSection] =
-    useState("Dashboard");
-
-  const [uploading, setUploading] =
-    useState(false);
-
-  const [publishingId, setPublishingId] =
-    useState<string | null>(null);
-
-  const [bufferChannels, setBufferChannels] =
-    useState<BufferChannel[]>([]);
-
-  const [selectedChannelIds, setSelectedChannelIds] =
-    useState<string[]>([]);
-
-  const [loadingChannels, setLoadingChannels] =
-    useState(false);
-  
-  async function handleExternalImageUpload(
-  event: React.ChangeEvent<HTMLInputElement>
-) {
-  const file = event.target.files?.[0];
-
-  if (!file) return;
-
-  if (!file.type.startsWith("image/")) {
-    alert("من فضلك اختر صورة فقط");
-    return;
-  }
-
-  setUploadingExternalImage(true);
-
-  try {
-    const reader = new FileReader();
-
-    reader.onload = async () => {
-      try {
-        const dataUrl = reader.result;
-
-        if (
-          typeof dataUrl !== "string" ||
-          !dataUrl.startsWith("data:image/")
-        ) {
-          throw new Error("Invalid image");
-        }
-
-        const response = await fetch(
-          "/api/upload",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              image: dataUrl,
-            }),
-          }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-          throw new Error(
-            data?.error ||
-              "فشل رفع الصورة"
-          );
-        }
-
-        setExternalImage(data.url);
-
-        alert("تم رفع الصورة بنجاح");
-        
-        console.log(
-          "External image URL:",
-          data.url
-        );
-      } catch (error) {
-        console.error(
-          "External upload error:",
-          error
-        );
-
-        alert(
-          error instanceof Error
-            ? error.message
-            : "فشل رفع الصورة"
-        );
-      } finally {
-        setUploadingExternalImage(false);
-      }
-    };
-
-    reader.onerror = () => {
-      setUploadingExternalImage(false);
-      alert("فشل قراءة الصورة");
-    };
-
-    reader.readAsDataURL(file);
-  } catch (error) {
-    console.error(error);
-    setUploadingExternalImage(false);
-  }
-}
-
-const availablePlatforms = Array.from(
-  new Set(
-    bufferChannels
-      .filter(
-        (channel) =>
-          !channel.isDisconnected &&
-          !channel.isLocked
-      )
-      .map((channel) => channel.service)
-  )
+const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>(
+[]
 );
-  
-  /*
-   * LOAD POSTS AND CHANNELS
-   */
-  
-  useEffect(() => {
-    async function loadBufferChannels() {
-      setLoadingChannels(true);
 
-      try {
-        const response = await fetch(
-          "/api/buffer/channels",
-          {
-            cache: "no-store",
-          }
-        );
+const [loadingChannels, setLoadingChannels] = useState(false);
 
-        const data =
-          (await response.json()) as BufferChannelsResponse;
-
-        if (!response.ok || !data.success) {
-          throw new Error(
-            data?.errors?.[0]?.error ||
-              "فشل تحميل حسابات Buffer"
-          );
-        }
-
-        setBufferChannels(
-          Array.isArray(data.channels)
-            ? data.channels
-            : []
-        );
-
-        /*
-        * Initially select all connected channels.
-        */
-        const availableChannels =
-          (data.channels || []).filter(
-            (channel) =>
-              !channel.isDisconnected &&
-              !channel.isLocked
-          );
-
-        setSelectedChannelIds(
-          (data.channels || [])
-            .filter(
-              (channel) =>
-                !channel.isDisconnected &&
-                !channel.isLocked &&
-                platforms.some(
-                  (platform) =>
-                    channel.service.toLowerCase() ===
-                    platform.toLowerCase()
-                )
-            )
-            .map((channel) => channel.id)
-        );
-      } catch (error) {
-        console.error(
-          "Buffer channels error:",
-          error
-        );
-      } finally {
-        setLoadingChannels(false);
-      }
-    }
-
-    loadBufferChannels();
-  }, []);
-
-
-  useEffect(() => {
-    try {
-      const raw =
-        localStorage.getItem(STORAGE);
-
-      if (raw) {
-        setPosts(JSON.parse(raw));
-      }
-    } catch (error) {
-      console.error(
-        "Failed to load posts:",
-        error
-      );
-    }
-  }, []);
-
-  /*
-   * SAVE POSTS
-   *
-   * Images are now public HTTPS URLs,
-   * not Base64.
-   */
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE,
-        JSON.stringify(posts)
-      );
-    } catch (error) {
-      console.error(
-        "Failed to save posts:",
-        error
-      );
-    }
-  }, [posts]);
-
-  /*
-   * RECEIVE POST FROM BANK GENERATOR
-   */
-  useEffect(() => {
-    const onMessage = async (
-      event: MessageEvent
-    ) => {
-      const data = event.data;
-
-      if (
-        !data ||
-        data.type !==
-          "DALEELAK_SOCIAL_POST"
-      ) {
-        return;
-      }
-
-      const incomingSource: Source =
-        data.source === "treasury" ||
-        data.source === "deposits"
-          ? data.source
-          : "certificates";
-
-      const incomingCaption =
-        data.caption || "";
-
-      const incomingImage =
-        data.image || "";
-
-      setSource(incomingSource);
-      setCaption(incomingCaption);
-      setImage(incomingImage);
-      setSection("Content");
-
-      /*
-       * If there is an image,
-       * upload it immediately.
-       */
-      if (incomingImage) {
-        setUploading(true);
-
-        try {
-          const uploadResponse =
-            await fetch("/api/upload", {
-              method: "POST",
-              headers: {
-                "Content-Type":
-                  "application/json",
-              },
-              body: JSON.stringify({
-                image: incomingImage,
-              }),
-            });
-
-          const uploadData =
-            await uploadResponse.json();
-
-          if (
-            !uploadResponse.ok ||
-            !uploadData.url
-          ) {
-            throw new Error(
-              uploadData.error ||
-                "فشل رفع الصورة"
-            );
-          }
-
-          const post: Post = {
-            id: crypto.randomUUID(),
-
-            source: incomingSource,
-
-            title:
-              data.title ||
-              titleFor(incomingSource),
-
-            caption: incomingCaption,
-
-            image: uploadData.url,
-
-            platforms: platforms,
-
-            channelIds: selectedChannelIds,
-
-            status: "draft",
-
-            createdAt:
-              new Date().toISOString(),
-          };
-
-          setPosts((current) => [
-            post,
-            ...current,
-          ]);
-
-          /*
-           * Show public URL in composer
-           */
-          setImage(uploadData.url);
-        } catch (error) {
-          console.error(
-            "Image upload failed:",
-            error
-          );
-
-          const post: Post = {
-            id: crypto.randomUUID(),
-
-            source: incomingSource,
-
-            title:
-              data.title ||
-              titleFor(incomingSource),
-
-            caption: incomingCaption,
-
-            image: "",
-
-            platforms: platforms,
-
-            channelIds: selectedChannelIds,
-
-            status: "failed",
-
-            createdAt:
-              new Date().toISOString(),
-
-            error:
-              error instanceof Error
-                ? error.message
-                : "فشل رفع الصورة",
-          };
-
-          setPosts((current) => [
-            post,
-            ...current,
-          ]);
-
-          alert(
-            error instanceof Error
-              ? error.message
-              : "فشل رفع الصورة"
-          );
-        } finally {
-          setUploading(false);
-        }
-
-        return;
-      }
-
-      /*
-       * If there is no image,
-       * create normal draft.
-       */
-      const post: Post = {
-        id: crypto.randomUUID(),
-
-        source: incomingSource,
-
-        title:
-          data.title ||
-          titleFor(incomingSource),
-
-        caption: incomingCaption,
-
-        image: "",
-
-        platforms: platforms,
-
-        channelIds: selectedChannelIds,
-
-        status: "draft",
-
-        createdAt:
-          new Date().toISOString(),
-      };
-
-      setPosts((current) => [
-        post,
-        ...current,
-      ]);
-    };
-
-    window.addEventListener(
-      "message",
-      onMessage
-    );
-
-    return () =>
-      window.removeEventListener(
-        "message",
-        onMessage
-      );
-  }, [selectedChannelIds, platforms]);
-
-  /*
-   * STATS
-   */
-  const stats = useMemo(
-    () => ({
-      drafts: posts.filter(
-        (p) => p.status === "draft"
-      ).length,
-
-      scheduled: posts.filter(
-        (p) => p.status === "scheduled"
-      ).length,
-
-      published: posts.filter(
-        (p) => p.status === "published"
-      ).length,
-
-      failed: posts.filter(
-        (p) => p.status === "failed"
-      ).length,
-    }),
-    [posts]
-  );
-
-  /*
-   * OPEN GENERATOR
-   */
-  function openGenerator(
-    selectedSource: Source
-  ) {
-    setSource(selectedSource);
-
-    window.open(
-      BANKS_URL +
-        generators[selectedSource].path,
-      "_blank",
-      "width=1450,height=1000"
-    );
-  }
-
-  /*
-   * PLATFORM TOGGLE
-   */
-function togglePlatform(
-  platform: Platform
+async function handleMediaUpload(
+event: React.ChangeEvent<HTMLInputElement>
 ) {
-  const willSelect =
-    !platforms.includes(platform);
+const file = event.target.files?.[0];
 
-  setPlatforms((current) =>
-    willSelect
-      ? [...current, platform]
-      : current.filter(
-          (item) => item !== platform
-        )
-  );
-
-  const matchingChannels =
-    bufferChannels.filter(
-      (channel) =>
-        channel.service.toLowerCase() ===
-          platform.toLowerCase() &&
-        !channel.isDisconnected &&
-        !channel.isLocked
-    );
-
-  setSelectedChannelIds((current) => {
-    if (willSelect) {
-      const newIds =
-        matchingChannels
-          .map((channel) => channel.id)
-          .filter(
-            (id) => !current.includes(id)
-          );
-
-      return [...current, ...newIds];
-    }
-
-    const removeIds =
-      new Set(
-        matchingChannels.map(
-          (channel) => channel.id
-        )
-      );
-
-    return current.filter(
-      (id) => !removeIds.has(id)
-    );
-  });
+if (!file) {
+  return;
 }
 
-  /*
-   * SAVE MANUAL POST
-   */
-  function save(status: Status) {
-    if (
-      !caption.trim() &&
-      !image
-    ) {
-      return;
-    }
+if (
+  !file.type.startsWith("image/") &&
+  !file.type.startsWith("video/")
+) {
+  alert("من فضلك اختر صورة أو فيديو فقط");
+  event.target.value = "";
+  return;
+}
 
-    const post: Post = {
-      id: crypto.randomUUID(),
-      source,
-      title: titleFor(source),
-      caption,
-      image,
-      platforms,
-      channelIds: selectedChannelIds,
-      status,
-      createdAt: new Date().toISOString(),
-    };
+const detectedType: MediaType = file.type.startsWith("video/")
+  ? "video"
+  : "image";
 
-    setPosts((current) => [
-      post,
-      ...current,
-    ]);
+if (
+  platforms.includes("YouTube") &&
+  detectedType !== "video"
+) {
+  alert("عند اختيار YouTube يجب رفع فيديو");
+  event.target.value = "";
+  return;
+}
 
-    setCaption("");
-    setImage("");
-  }
+setUploadingMedia(true);
 
-  /*
-   * UPLOAD BASE64 IMAGE
-   */
-  async function uploadImage(
-    base64Image: string
-  ) {
-    const response =
-      await fetch("/api/upload", {
+try {
+  const reader = new FileReader();
+
+  reader.onload = async () => {
+    try {
+      const dataUrl = reader.result;
+
+      if (typeof dataUrl !== "string") {
+        throw new Error("Invalid media");
+      }
+
+      const response = await fetch("/api/upload", {
         method: "POST",
-
         headers: {
-          "Content-Type":
-            "application/json",
+          "Content-Type": "application/json",
         },
-
         body: JSON.stringify({
-          image: base64Image,
+          media: dataUrl,
         }),
       });
 
-    const data =
-      await response.json();
+      const data = await response.json();
 
-    if (
-      !response.ok ||
-      !data.url
-    ) {
-      throw new Error(
-        data.error ||
-          "فشل رفع الصورة"
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data?.error || "فشل رفع الملف"
+        );
+      }
+
+      setMedia(data.url);
+      setMediaType(detectedType);
+
+      alert(
+        detectedType === "video"
+          ? "تم رفع الفيديو بنجاح"
+          : "تم رفع الصورة بنجاح"
       );
+    } catch (error) {
+      console.error("Media upload error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "فشل رفع الملف"
+      );
+    } finally {
+      setUploadingMedia(false);
     }
+  };
 
-    return data.url as string;
-  }
+  reader.onerror = () => {
+    setUploadingMedia(false);
+    alert("فشل قراءة الملف");
+  };
 
-  /*
-   * PUBLISH POST
-   */
+  reader.readAsDataURL(file);
+} catch (error) {
+  console.error(error);
 
-async function publishPost(post: Post) {
-  if (!post.image) {
-    alert("لا توجد صورة لهذا المنشور");
-    return;
-  }
+  setUploadingMedia(false);
 
-  if (!post.caption.trim()) {
-    alert("لا يوجد Caption لهذا المنشور");
-    return;
-  }
+  alert(
+    error instanceof Error
+      ? error.message
+      : "فشل رفع الملف"
+  );
+} finally {
+  event.target.value = "";
+}
 
-  if (!post.channelIds || post.channelIds.length === 0) {
-    alert("اختر حسابًا واحدًا على الأقل من Buffer");
-    return;
-  }
+}
 
-  setPublishingId(post.id);
+const availablePlatforms = useMemo(() => {
+return Array.from(
+new Set(
+bufferChannels
+.filter(
+(channel) =>
+!channel.isDisconnected &&
+!channel.isLocked
+)
+.map((channel) =>
+normalizePlatform(channel.service)
+)
+.filter(
+(platform): platform is Platform =>
+platform !== null
+)
+)
+);
+}, [bufferChannels]);
+
+function getChannelIdsForPlatforms(
+selectedPlatforms: Platform[]
+) {
+return bufferChannels
+.filter(
+(channel) =>
+!channel.isDisconnected &&
+!channel.isLocked
+)
+.filter((channel) => {
+const normalized = normalizePlatform(
+channel.service
+);
+
+    return (
+      normalized !== null &&
+      selectedPlatforms.includes(normalized)
+    );
+  })
+  .map((channel) => channel.id);
+
+}
+
+useEffect(() => {
+async function loadBufferChannels() {
+setLoadingChannels(true);
 
   try {
     const response = await fetch(
-      "/api/buffer/publish",
+      "/api/buffer/channels",
+      {
+        cache: "no-store",
+      }
+    );
+
+    const data =
+      (await response.json()) as BufferChannelsResponse;
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data?.errors?.[0]?.error ||
+          "فشل تحميل حسابات Buffer"
+      );
+    }
+
+    const channels = Array.isArray(data.channels)
+      ? data.channels
+      : [];
+
+    setBufferChannels(channels);
+  } catch (error) {
+    console.error(
+      "Buffer channels error:",
+      error
+    );
+  } finally {
+    setLoadingChannels(false);
+  }
+}
+
+loadBufferChannels();
+
+}, []);
+
+useEffect(() => {
+try {
+const raw = localStorage.getItem(STORAGE);
+
+  if (!raw) {
+    return;
+  }
+
+  const parsed = JSON.parse(raw);
+
+  if (!Array.isArray(parsed)) {
+    return;
+  }
+
+  const migratedPosts: Post[] = parsed
+    .filter(
+      (post) =>
+        post &&
+        typeof post === "object" &&
+        typeof post.id === "string"
+    )
+    .map((post) => ({
+      ...post,
+      media:
+        typeof post.media === "string"
+          ? post.media
+          : typeof post.image === "string"
+          ? post.image
+          : "",
+      mediaType:
+        post.mediaType === "video"
+          ? "video"
+          : "image",
+      platforms: Array.isArray(post.platforms)
+        ? post.platforms
+        : ["Facebook"],
+      channelIds: Array.isArray(post.channelIds)
+        ? post.channelIds
+        : [],
+    }));
+
+  setPosts(migratedPosts);
+} catch (error) {
+  console.error(
+    "Failed to load posts:",
+    error
+  );
+}
+
+}, []);
+
+useEffect(() => {
+try {
+localStorage.setItem(
+STORAGE,
+JSON.stringify(posts)
+);
+} catch (error) {
+console.error(
+"Failed to save posts:",
+error
+);
+}
+}, [posts]);
+
+useEffect(() => {
+const onMessage = async (
+event: MessageEvent
+) => {
+const data = event.data;
+
+  if (
+    !data ||
+    data.type !== "DALEELAK_SOCIAL_POST"
+  ) {
+    return;
+  }
+
+  const incomingSource: Source =
+    data.source === "treasury" ||
+    data.source === "deposits"
+      ? data.source
+      : "certificates";
+
+  const incomingCaption =
+    typeof data.caption === "string"
+      ? data.caption
+      : "";
+
+  const incomingImage =
+    typeof data.image === "string"
+      ? data.image
+      : "";
+
+  setSource(incomingSource);
+  setCaption(incomingCaption);
+  setSection("Content");
+
+  if (!incomingImage) {
+    return;
+  }
+
+  setUploading(true);
+
+  try {
+    const uploadResponse = await fetch(
+      "/api/upload",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          imageUrl: post.image,
-          caption: post.caption,
-          channelIds: post.channelIds,
+          media: incomingImage,
         }),
       }
     );
 
-    const data = await response.json();
+    const uploadData =
+      await uploadResponse.json();
 
-    if (!response.ok || !data.success && !data.partialSuccess) {
+    if (
+      !uploadResponse.ok ||
+      !uploadData.success ||
+      !uploadData.url
+    ) {
       throw new Error(
-        data?.error ||
-          "فشل نشر المنشور عبر Buffer"
+        uploadData.error ||
+          "فشل رفع الصورة"
       );
     }
 
-    setPosts((prev) =>
-      prev.map((item) =>
-        item.id === post.id
-          ? {
-              ...item,
-              status:
-                data.partialSuccess
-                  ? "failed"
-                  : "published",
-              error:
-                data.partialSuccess
-                  ? `تم النشر على ${data.published} من ${data.total} حسابات`
-                  : undefined,
-            }
-          : item
-      )
-    );
-
-    if (data.partialSuccess) {
-      alert(
-        `تم النشر جزئيًا: ${data.published} من ${data.total} حسابات`
-      );
-    } else {
-      alert(
-        `تم نشر المنشور بنجاح على ${data.published} حسابات`
-      );
-    }
-
-    console.log(
-      "Buffer publish results:",
-      data.results
-    );
+    setMedia(uploadData.url);
+    setMediaType("image");
   } catch (error) {
     console.error(
-      "Publish error:",
+      "Image upload failed:",
       error
-    );
-
-    setPosts((prev) =>
-      prev.map((item) =>
-        item.id === post.id
-          ? {
-              ...item,
-              status: "failed",
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "فشل نشر المنشور",
-            }
-          : item
-      )
     );
 
     alert(
       error instanceof Error
         ? error.message
-        : "فشل نشر المنشور"
+        : "فشل رفع الصورة"
     );
   } finally {
-    setPublishingId(null);
+    setUploading(false);
   }
+};
+
+window.addEventListener(
+  "message",
+  onMessage
+);
+
+return () => {
+  window.removeEventListener(
+    "message",
+    onMessage
+  );
+};
+
+}, []);
+
+const stats = useMemo(
+() => ({
+drafts: posts.filter(
+(post) => post.status === "draft"
+).length,
+
+  scheduled: posts.filter(
+    (post) => post.status === "scheduled"
+  ).length,
+
+  published: posts.filter(
+    (post) => post.status === "published"
+  ).length,
+
+  failed: posts.filter(
+    (post) => post.status === "failed"
+  ).length,
+}),
+[posts]
+
+);
+
+function openGenerator(
+selectedSource: Source
+) {
+setSource(selectedSource);
+
+window.open(
+  BANKS_URL +
+    generators[selectedSource].path,
+  "_blank",
+  "width=1450,height=1000"
+);
+
 }
 
-  /*
-   * DELETE
-   */
-  function remove(id: string) {
-    setPosts((current) =>
-      current.filter(
-        (post) => post.id !== id
-      )
+function togglePlatform(
+platform: Platform
+) {
+const isSelected =
+platforms.includes(platform);
+
+if (isSelected) {
+  const nextPlatforms =
+    platforms.filter(
+      (item) => item !== platform
+    );
+
+  setPlatforms(nextPlatforms);
+  return;
+}
+
+if (
+  platform === "YouTube" &&
+  media &&
+  mediaType !== "video"
+) {
+  alert(
+    "YouTube يحتاج فيديو. استخدم زر Upload لرفع فيديو."
+  );
+  return;
+}
+
+setPlatforms([
+  ...platforms,
+  platform,
+]);
+
+}
+
+function createPost() {
+if (!media) {
+alert(
+"يرجى رفع صورة أو فيديو أولًا"
+);
+return;
+}
+
+if (!caption.trim()) {
+  alert(
+    "يرجى كتابة Caption أولًا"
+  );
+  return;
+}
+
+if (platforms.length === 0) {
+  alert(
+    "اختر منصة واحدة على الأقل"
+  );
+  return;
+}
+
+if (
+  platforms.includes("YouTube") &&
+  mediaType !== "video"
+) {
+  alert(
+    "YouTube يحتاج فيديو"
+  );
+  return;
+}
+
+const channelIds =
+  getChannelIdsForPlatforms(
+    platforms
+  );
+
+if (channelIds.length === 0) {
+  alert(
+    "لم يتم العثور على حساب Buffer للمنصات المختارة"
+  );
+  return;
+}
+
+const post: Post = {
+  id: crypto.randomUUID(),
+  source,
+  title: titleFor(source),
+  caption: caption.trim(),
+  media,
+  mediaType,
+  platforms: [...platforms],
+  channelIds,
+  status: "draft",
+  createdAt: new Date().toISOString(),
+};
+
+setPosts((current) => [
+  post,
+  ...current,
+]);
+
+setCaption("");
+setMedia("");
+setMediaType("image");
+
+}
+
+async function publishPost(
+post: Post
+) {
+if (!post.media) {
+alert(
+"لا توجد صورة أو فيديو لهذا المنشور"
+);
+return;
+}
+
+if (!post.caption.trim()) {
+  alert(
+    "لا يوجد Caption لهذا المنشور"
+  );
+  return;
+}
+
+if (
+  !post.channelIds ||
+  post.channelIds.length === 0
+) {
+  alert(
+    "لم يتم العثور على حساب Buffer للمنصات المختارة"
+  );
+  return;
+}
+
+if (
+  post.platforms.includes("YouTube") &&
+  post.mediaType !== "video"
+) {
+  alert(
+    "منشور YouTube يجب أن يحتوي على فيديو"
+  );
+  return;
+}
+
+setPublishingId(post.id);
+
+try {
+  const response = await fetch(
+    "/api/buffer/publish",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        imageUrl:
+          post.mediaType === "image"
+            ? post.media
+            : undefined,
+
+        videoUrl:
+          post.mediaType === "video"
+            ? post.media
+            : undefined,
+
+        caption: post.caption,
+
+        channelIds:
+          post.channelIds,
+
+        source: post.source,
+      }),
+    }
+  );
+
+  const data =
+    await response.json();
+
+  if (
+    !response.ok ||
+    (!data.success &&
+      !data.partialSuccess)
+  ) {
+    throw new Error(
+      data?.error ||
+        "فشل نشر المنشور عبر Buffer"
     );
   }
 
-  return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>
-            دليلك البنكي
-          </strong>
+  setPosts((current) =>
+    current.map((item) =>
+      item.id === post.id
+        ? {
+            ...item,
+            status:
+              data.partialSuccess
+                ? "failed"
+                : "published",
+            error:
+              data.partialSuccess
+                ? `تم النشر على ${data.published} من ${data.total} حسابات`
+                : undefined,
+          }
+        : item
+    )
+  );
 
-          <span>
-            Social Media Manager
-          </span>
-        </div>
+  if (data.partialSuccess) {
+    alert(
+      `تم النشر جزئيًا: ${data.published} من ${data.total} حسابات`
+    );
+  } else {
+    alert(
+      `تم نشر المنشور بنجاح على ${data.published} حسابات`
+    );
+  }
 
-        <nav>
-          {[
-            "Dashboard",
-            "Content",
-            "Calendar",
-            "Accounts",
-            "Analytics",
-            "Settings",
-          ].map((item) => (
-            <button
-              key={item}
-              className={
-                section === item
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                setSection(item)
-              }
-            >
-              {item}
-            </button>
-          ))}
-        </nav>
-      </aside>
+  console.log(
+    "Buffer publish results:",
+    data.results
+  );
+} catch (error) {
+  console.error(
+    "Publish error:",
+    error
+  );
 
-      <main className="main">
-        <header>
-          <h1>
-            لوحة تحكم السوشيال ميديا
-          </h1>
+  setPosts((current) =>
+    current.map((item) =>
+      item.id === post.id
+        ? {
+            ...item,
+            status: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "فشل نشر المنشور",
+          }
+        : item
+    )
+  );
 
-          <p>
-            إدارة ونشر محتوى دليلك البنكي
-            من مكان واحد
-          </p>
-        </header>
+  alert(
+    error instanceof Error
+      ? error.message
+      : "فشل نشر المنشور"
+  );
+} finally {
+  setPublishingId(null);
+}
 
-        <section className="stats">
-          <Stat
-            label="Drafts"
-            value={stats.drafts}
-          />
+}
 
-          <Stat
-            label="Scheduled"
-            value={
-              stats.scheduled
-            }
-          />
+function removePost(id: string) {
+setPosts((current) =>
+current.filter(
+(post) => post.id !== id
+)
+);
+}
 
-          <Stat
-            label="Published"
-            value={
-              stats.published
-            }
-          />
+return (
+<div className="app">
+<aside className="sidebar">
+<div className="brand">
+<strong>
+دليلك البنكي
+</strong>
 
-          <Stat
-            label="Failed"
-            value={stats.failed}
-          />
-        </section>
+      <span>
+        Social Media Manager
+      </span>
+    </div>
 
-        <section className="grid">
-          <div className="card queue">
-            <h2>
-              محتوى قيد النشر
-            </h2>
+    <nav>
+      {[
+        "Dashboard",
+        "Content",
+        "Calendar",
+        "Accounts",
+        "Analytics",
+        "Settings",
+      ].map((item) => (
+        <button
+          key={item}
+          className={
+            section === item
+              ? "active"
+              : ""
+          }
+          onClick={() =>
+            setSection(item)
+          }
+        >
+          {item}
+        </button>
+      ))}
+    </nav>
+  </aside>
 
-            <p className="muted">
-              آخر المنشورات والمجدولة
-            </p>
+  <main className="main">
+    <header>
+      <h1>
+        لوحة تحكم السوشيال ميديا
+      </h1>
 
-            <div className="posts">
-              {posts
-                .slice(0, 5)
-                .map((post) => (
-                  <article
-                    className="post"
-                    key={post.id}
-                  >
-                    <div className="thumb">
-                      {post.image && (
-                        <img
-                          src={
-                            post.image
-                          }
-                          alt=""
-                        />
-                      )}
-                    </div>
+      <p>
+        إدارة ونشر محتوى دليلك البنكي
+        من مكان واحد
+      </p>
+    </header>
 
-                    <div>
-                      <h3>
-                        {post.title}
-                      </h3>
+    <section className="stats">
+      <Stat
+        label="Drafts"
+        value={stats.drafts}
+      />
 
-                      <p>
-                        {post.caption ||
-                          "لا يوجد كابشن"}
-                      </p>
+      <Stat
+        label="Scheduled"
+        value={stats.scheduled}
+      />
 
-                      <small>
-                        {post.platforms.join(
-                          " • "
-                        )}{" "}
-                        ·{" "}
-                        {post.status}
-                      </small>
-                    </div>
-                  </article>
-                ))}
+      <Stat
+        label="Published"
+        value={stats.published}
+      />
 
-              {!posts.length && (
-                <div className="empty">
-                  افتح أحد منشئات
-                  البوستات لإرسال الصورة
-                  والكابشن إلى الداشبورد.
-                </div>
-              )}
-            </div>
-          </div>
+      <Stat
+        label="Failed"
+        value={stats.failed}
+      />
+    </section>
 
-          <div className="card composer">
-            <h2>
-              إنشاء منشور
-            </h2>
+    <section className="grid">
+      <div className="card queue">
+        <h2>
+          محتوى قيد النشر
+        </h2>
 
-            <label>
-              مصدر المحتوى
-            </label>
+        <p className="muted">
+          آخر المنشورات والمجدولة
+        </p>
 
-            <div className="source-list">
-              {(
-                Object.keys(
-                  generators
-                ) as Source[]
-              ).map(
-                (
-                  selectedSource
-                ) => (
-                  <button
-                    key={
-                      selectedSource
-                    }
-                    onClick={() =>
-                      openGenerator(
-                        selectedSource
-                      )
-                    }
-                  >
-                    {
-                      generators[
-                        selectedSource
-                      ].label
-                    }
-                  </button>
-                )
-              )}
-            </div>
-
-            <label>
-              Poster
-            </label>
-
-            <div className="upload">
-              {uploading ? (
-                <span>
-                  جاري رفع الصورة...
-                </span>
-              ) : image ? (
-                <img
-                  src={image}
-                  alt="Poster"
-                  style={{
-                    width: "100%",
-                    maxWidth: "420px",
-                    maxHeight: "420px",
-                    height: "auto",
-                    objectFit: "contain",
-                    display: "block",
-                    margin: "0 auto",
-                    borderRadius: "12px",
-                  }}
-                />
-              ) : externalImage ? (
-                <img
-                  src={externalImage}
-                  alt="Uploaded"
-                  style={{
-                    width: "100%",
-                    maxWidth: "420px",
-                    maxHeight: "420px",
-                    height: "auto",
-                    objectFit: "contain",
-                    display: "block",
-                    margin: "0 auto",
-                    borderRadius: "12px",
-                  }}
-                />
-              ) : (
-                <span>
-                  سيظهر البوستر هنا بعد
-                  إرساله من المنشئ
-                </span>
-              )}
-            </div>
-
-            <div className="external-upload">
-              <label
-                htmlFor="external-image-upload"
-              >
-                {uploadingExternalImage
-                  ? "جاري رفع الصورة..."
-                  : "Upload Image"}
-              </label>
-
-              <input
-                id="external-image-upload"
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                onChange={
-                  handleExternalImageUpload
-                }
-                disabled={
-                  uploadingExternalImage
-                }
-              />
-
-              {externalImage && (
-                <div>
-                  <p>
-                    تم رفع الصورة بنجاح
-                  </p>
-
-                  <img
-                    src={externalImage}
-                    alt="Uploaded preview"
-                  />
-
-                  <small>
-                    {externalImage}
-                  </small>
-                </div>
-              )}
-            </div>
-
-            <label>
-              Caption
-            </label>
-
-            <textarea
-              value={caption}
-              onChange={(event) =>
-                setCaption(
-                  event.target.value
-                )
-              }
-              placeholder="اكتب الكابشن هنا..."
-            />
-
-            <label>
-              Platforms
-            </label>
-
-            <div className="platforms">
-              {availablePlatforms.map((platform) => (
-                <button
-                  key={platform}
-                  className={
-                    platforms.includes(
-                      platform as Platform
-                    )
-                      ? "selected"
-                      : ""
-                  }
-                  onClick={() =>
-                    togglePlatform(
-                      platform as Platform
-                    )
-                  }
-                >
-                  {platform}
-                </button>
-              ))}
-            </div>
-
-            <button
-              className="primary"
-              disabled={
-                uploading ||
-                uploadingExternalImage ||
-                (!image && !externalImage)
-              }
-              onClick={() => {
-                const draft: Post = {
-                  id: crypto.randomUUID(),
-                  source,
-                  title: titleFor(source),
-                  caption,
-                  image: externalImage || image,
-                  platforms,
-                  channelIds: selectedChannelIds,
-                  status: "draft",
-                  createdAt: new Date().toISOString(),
-                };
-
-                setPosts((current) => [
-                  draft,
-                  ...current,
-                ]);
-
-                setCaption("");
-                setImage("");
-                setExternalImage("");
-              }}
-            >
-              إضافة إلى قائمة النشر
-            </button>
-
-            <button
-              className="secondary"
-              disabled={
-                uploading ||
-                uploadingExternalImage ||
-                (!caption.trim() &&
-                  !image &&
-                  !externalImage)
-              }
-              onClick={() =>
-                save("draft")
-              }
-            >
-              حفظ كمسودة
-            </button>
-          </div>
-        </section>
-
-        {!!posts.length && (
-          <section className="card all">
-            <h2>
-              كل المحتوى
-            </h2>
-
-            {posts.map((post) => (
-              <div
-                className="row"
+        <div className="posts">
+          {posts
+            .slice(0, 5)
+            .map((post) => (
+              <article
+                className="post"
                 key={post.id}
               >
-                <div>
-                  <b>
-                    {post.title}
-                  </b>
+                <div className="thumb">
+                  {post.media ? (
+                    post.mediaType ===
+                    "video" ? (
+                      <video
+                        src={post.media}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        style={{
+                          width:
+                            "100%",
+                          height:
+                            "100%",
+                          objectFit:
+                            "cover",
+                        }}
+                      />
+                    ) : (
+                      <img
+                        src={post.media}
+                        alt=""
+                      />
+                    )
+                  ) : null}
+                </div>
 
-                  <span>
-                    {post.caption}
-                  </span>
+                <div>
+                  <h3>
+                    {post.title}
+                  </h3>
+
+                  <p>
+                    {post.caption ||
+                      "لا يوجد كابشن"}
+                  </p>
 
                   <small>
                     {post.platforms.join(
@@ -1195,76 +920,375 @@ async function publishPost(post: Post) {
                     ·{" "}
                     {post.status}
                   </small>
-
-                  {post.error && (
-                    <small>
-                      خطأ:{" "}
-                      {post.error}
-                    </small>
-                  )}
                 </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "8px",
-                    alignItems:
-                      "center",
-                  }}
-                >
-                  {post.status !==
-                    "published" && (
-                    <button
-                      disabled={
-                        publishingId ===
-                        post.id
-                      }
-                      onClick={() =>
-                        publishPost(
-                          post
-                        )
-                      }
-                    >
-                      {publishingId ===
-                      post.id
-                        ? "جاري النشر..."
-                        : "نشر الآن"}
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() =>
-                      remove(post.id)
-                    }
-                  >
-                    حذف
-                  </button>
-                </div>
-              </div>
+              </article>
             ))}
-          </section>
-        )}
-      </main>
-    </div>
-  );
+
+          {!posts.length && (
+            <div className="empty">
+              افتح أحد منشئات
+              البوستات لإرسال الصورة
+              والكابشن إلى الداشبورد.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="card composer">
+        <h2>
+          إنشاء منشور
+        </h2>
+
+        <label>
+          مصدر المحتوى
+        </label>
+
+        <div className="source-list">
+          {(
+            Object.keys(
+              generators
+            ) as Source[]
+          ).map(
+            (selectedSource) => (
+              <button
+                key={
+                  selectedSource
+                }
+                onClick={() =>
+                  openGenerator(
+                    selectedSource
+                  )
+                }
+              >
+                {
+                  generators[
+                    selectedSource
+                  ].label
+                }
+              </button>
+            )
+          )}
+        </div>
+
+        <label>
+          Media
+        </label>
+
+        <div className="upload">
+          {uploading ||
+          uploadingMedia ? (
+            <span>
+              جاري رفع الملف...
+            </span>
+          ) : media ? (
+            mediaType ===
+            "video" ? (
+              <video
+                src={media}
+                controls
+                playsInline
+                style={{
+                  width:
+                    "100%",
+                  maxWidth:
+                    "520px",
+                  maxHeight:
+                    "420px",
+                  height:
+                    "auto",
+                  objectFit:
+                    "contain",
+                  display:
+                    "block",
+                  margin:
+                    "0 auto",
+                  borderRadius:
+                    "12px",
+                }}
+              />
+            ) : (
+              <img
+                src={media}
+                alt="Poster"
+                style={{
+                  width:
+                    "100%",
+                  maxWidth:
+                    "420px",
+                  maxHeight:
+                    "420px",
+                  height:
+                    "auto",
+                  objectFit:
+                    "contain",
+                  display:
+                    "block",
+                  margin:
+                    "0 auto",
+                  borderRadius:
+                    "12px",
+                }}
+              />
+            )
+          ) : (
+            <span>
+              سيظهر الملف هنا بعد رفعه
+            </span>
+          )}
+        </div>
+
+        <div className="external-upload">
+          <label htmlFor="media-upload">
+            {uploadingMedia
+              ? "جاري الرفع..."
+              : "Upload"}
+          </label>
+
+          <input
+            id="media-upload"
+            type="file"
+            accept="image/*,video/*"
+            onChange={
+              handleMediaUpload
+            }
+            disabled={
+              uploadingMedia ||
+              uploading
+            }
+          />
+        </div>
+
+        <label>
+          Caption
+        </label>
+
+        <textarea
+          value={caption}
+          onChange={(event) =>
+            setCaption(
+              event.target.value
+            )
+          }
+          placeholder="اكتب الكابشن هنا..."
+        />
+
+        <label>
+          Platforms
+        </label>
+
+        <div className="platforms">
+          {loadingChannels ? (
+            <span>
+              جاري تحميل حسابات Buffer...
+            </span>
+          ) : availablePlatforms.length ===
+            0 ? (
+            <span>
+              لا توجد حسابات Buffer متصلة
+            </span>
+          ) : (
+            availablePlatforms.map(
+              (platform) => (
+                <button
+                  key={
+                    platform
+                  }
+                  className={
+                    platforms.includes(
+                      platform
+                    )
+                      ? "selected"
+                      : ""
+                  }
+                  onClick={() =>
+                    togglePlatform(
+                      platform
+                    )
+                  }
+                >
+                  {platform}
+                </button>
+              )
+            )
+          )}
+        </div>
+
+        <button
+          className="primary"
+          disabled={
+            uploading ||
+            uploadingMedia ||
+            !media
+          }
+          onClick={createPost}
+        >
+          إضافة إلى قائمة النشر
+        </button>
+
+        <button
+          className="secondary"
+          disabled={
+            uploading ||
+            uploadingMedia ||
+            (!caption.trim() &&
+              !media)
+          }
+          onClick={() => {
+            if (
+              !caption.trim() &&
+              !media
+            ) {
+              return;
+            }
+
+            const channelIds =
+              getChannelIdsForPlatforms(
+                platforms
+              );
+
+            const draft: Post = {
+              id: crypto.randomUUID(),
+              source,
+              title:
+                titleFor(source),
+              caption:
+                caption.trim(),
+              media,
+              mediaType,
+              platforms: [
+                ...platforms,
+              ],
+              channelIds,
+              status: "draft",
+              createdAt:
+                new Date().toISOString(),
+            };
+
+            setPosts(
+              (current) => [
+                draft,
+                ...current,
+              ]
+            );
+
+            setCaption("");
+            setMedia("");
+            setMediaType(
+              "image"
+            );
+          }}
+        >
+          حفظ كمسودة
+        </button>
+      </div>
+    </section>
+
+    {posts.length > 0 && (
+      <section className="card all">
+        <h2>
+          كل المحتوى
+        </h2>
+
+        {posts.map((post) => (
+          <div
+            className="row"
+            key={post.id}
+          >
+            <div>
+              <b>
+                {post.title}
+              </b>
+
+              <span>
+                {post.caption}
+              </span>
+
+              <small>
+                {post.platforms.join(
+                  " • "
+                )}{" "}
+                ·{" "}
+                {post.status}
+              </small>
+
+              <small>
+                النوع:{" "}
+                {post.mediaType ===
+                "video"
+                  ? "فيديو"
+                  : "صورة"}
+              </small>
+
+              {post.error && (
+                <small>
+                  خطأ:{" "}
+                  {post.error}
+                </small>
+              )}
+            </div>
+
+            <div
+              style={{
+                display:
+                  "flex",
+                gap: "8px",
+                alignItems:
+                  "center",
+              }}
+            >
+              {post.status !==
+                "published" && (
+                <button
+                  disabled={
+                    publishingId ===
+                    post.id
+                  }
+                  onClick={() =>
+                    publishPost(
+                      post
+                    )
+                  }
+                >
+                  {publishingId ===
+                  post.id
+                    ? "جاري النشر..."
+                    : "نشر الآن"}
+                </button>
+              )}
+
+              <button
+                onClick={() =>
+                  removePost(
+                    post.id
+                  )
+                }
+              >
+                حذف
+              </button>
+            </div>
+          </div>
+        ))}
+      </section>
+    )}
+  </main>
+</div>
+
+);
 }
 
 function Stat({
-  label,
-  value,
+label,
+value,
 }: {
-  label: string;
-  value: number;
+label: string;
+value: number;
 }) {
-  return (
-    <div className="stat">
-      <span>
-        {label}
-      </span>
+return (
+<div className="stat">
+<span>{label}</span>
 
-      <strong>
-        {value}
-      </strong>
-    </div>
-  );
+  <strong>{value}</strong>
+</div>
+
+);
 }
