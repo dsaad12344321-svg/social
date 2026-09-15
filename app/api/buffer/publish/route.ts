@@ -118,8 +118,10 @@ async function getChannels(
     const channelsQuery = `
       query GetChannels($organizationId: OrganizationId!) {
         channels(
-          organizationId: $organizationId
-        ) {
+            input: {
+              organizationId: $organizationId
+            }
+) {
           id
           name
           displayName
