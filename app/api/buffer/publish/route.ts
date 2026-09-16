@@ -266,6 +266,7 @@ async function createVideoPost(
           metadata: {
             instagram: {
               type: reel
+              shouldShareToFeed: true
             }
           }
         `
@@ -350,6 +351,7 @@ async function createImagePost(
           metadata: {
             instagram: {
               type: post
+              shouldShareToFeed: true
             }
           }
         `
