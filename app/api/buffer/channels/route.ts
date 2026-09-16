@@ -1,3 +1,4 @@
+
 type BufferOrganization = {
   id: string;
   name: string;
@@ -40,6 +41,11 @@ async function bufferRequest(
 
   const data = await response.json();
 
+  console.log(
+    "Buffer channels response:",
+    JSON.stringify(data, null, 2)
+  );
+
   if (!response.ok) {
     throw new Error(
       data?.errors?.[0]?.message ||
@@ -52,8 +58,12 @@ async function bufferRequest(
     data.errors.length
   ) {
     throw new Error(
-      data.errors[0]?.message ||
-        "Buffer GraphQL error"
+      data.errors
+        .map(
+          (error: { message?: string }) =>
+            error.message || "Buffer GraphQL error"
+        )
+        .join("; ")
     );
   }
 
@@ -64,8 +74,8 @@ async function getBufferAccount(
   apiKey: string,
   accountNumber: number
 ) {
-  const organizationsQuery = `
-    query GetOrganizations {
+  const organizationsQuery = 
+    `query GetOrganizations {
       account {
         organizations {
           id
@@ -73,8 +83,8 @@ async function getBufferAccount(
           ownerEmail
         }
       }
-    }
-  `;
+    }`
+  ;
 
   const organizationsData =
     await bufferRequest(
@@ -98,8 +108,8 @@ async function getBufferAccount(
   for (
     const organization of organizations as BufferOrganization[]
   ) {
-    const channelsQuery = `
-      query GetChannels(
+    const channelsQuery = 
+      `query GetChannels(
         $organizationId: OrganizationId!
       ) {
         channels(
@@ -116,8 +126,8 @@ async function getBufferAccount(
           isDisconnected
           isLocked
         }
-      }
-    `;
+      }`
+    
 
     const channelsData =
       await bufferRequest(
@@ -182,19 +192,32 @@ export async function GET() {
 
     for (const item of configuredKeys) {
       try {
-        accounts.push(
+        const account =
           await getBufferAccount(
             item.key,
             item.account
-          )
+          );
+
+        accounts.push(account);
+
+        console.log(
+          `Buffer account ${item.account} loaded successfully:`,
+          JSON.stringify(account, null, 2)
         );
       } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Unknown Buffer error";
+
+        console.error(
+          `Buffer account ${item.account} failed:`,
+          message
+        );
+
         errors.push({
           account: item.account,
-          error:
-            error instanceof Error
-              ? error.message
-              : "Unknown Buffer error",
+          error: message,
         });
       }
     }
@@ -207,12 +230,16 @@ export async function GET() {
               organization.channels.map(
                 (channel) => ({
                   ...channel,
+
                   account:
                     account.account,
+
                   organizationId:
                     organization.id,
+
                   organizationName:
                     organization.name,
+
                   ownerEmail:
                     organization.ownerEmail,
                 })
@@ -220,11 +247,34 @@ export async function GET() {
           )
       );
 
+    /*
+     * Important:
+     * If any configured Buffer account failed,
+     * do not silently pretend everything is OK.
+     *
+     * This makes problems with account 2
+     * (for example the Instagram account)
+     * visible immediately.
+     */
+    if (errors.length > 0) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            "فشل تحميل أحد حسابات Buffer",
+          accounts,
+          channels,
+          errors,
+        },
+        { status: 500 }
+      );
+    }
+
     return Response.json({
-      success: accounts.length > 0,
+      success: true,
       accounts,
       channels,
-      errors,
+      errors: [],
     });
   } catch (error) {
     console.error(
@@ -244,3 +294,4 @@ export async function GET() {
     );
   }
 }
+
