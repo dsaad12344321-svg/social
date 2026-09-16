@@ -400,12 +400,33 @@ async function createImagePost(
     }
   `;
 
-  return bufferRequest(apiKey, mutation, {
-    channelId,
-    text: caption,
-    imageUrl,
-  });
-}
+        console.log(
+        "=== INSTAGRAM IMAGE PUBLISH INPUT ===",
+        JSON.stringify(
+          {
+            channelId,
+            service,
+            imageUrl,
+            caption,
+          },
+          null,
+          2
+        )
+      );
+
+    const response = await bufferRequest(apiKey, mutation, {
+      channelId,
+      text: caption,
+      imageUrl,
+    });
+
+    console.log(
+      "=== INSTAGRAM IMAGE CREATE POST RESPONSE ===",
+      JSON.stringify(response, null, 2)
+    );
+
+    return response;
+    }
 
 async function createYoutubePost(
   apiKey: string,
