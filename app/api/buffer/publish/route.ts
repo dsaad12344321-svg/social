@@ -700,8 +700,12 @@ export async function POST(request: Request) {
           continue;
         }
 
-  // معالجة TikTok للفيديو
-  if (normalizeService(channel.service) === "tiktok") {
+  // Instagram video = Reel
+  // TikTok video = Video
+  if (
+    normalizeService(channel.service) === "instagram" ||
+    normalizeService(channel.service) === "tiktok"
+  ) {
     if (!videoUrl) {
       results.push({
         channelId: channel.id,
