@@ -255,8 +255,22 @@ async function createVideoPost(
   apiKey: string,
   channelId: string,
   caption: string,
-  videoUrl: string
+  videoUrl: string,
+  service: string
 ) {
+  const normalizedService = normalizeService(service);
+
+  const instagramMetadata =
+    normalizedService === "instagram"
+      ? `
+          metadata: {
+            instagram: {
+              type: reel
+            }
+          }
+        `
+      : "";
+
   const mutation = `
     mutation CreateVideoPost(
       $channelId: ChannelId!,
@@ -269,6 +283,7 @@ async function createVideoPost(
           text: $text
           schedulingType: automatic
           mode: shareNow
+
           assets: [
             {
               video: {
@@ -276,6 +291,8 @@ async function createVideoPost(
               }
             }
           ]
+
+          ${instagramMetadata}
         }
       ) {
         ... on PostActionSuccess {
@@ -322,8 +339,22 @@ async function createImagePost(
   apiKey: string,
   channelId: string,
   caption: string,
-  imageUrl: string
+  imageUrl: string,
+  service: string
 ) {
+  const normalizedService = normalizeService(service);
+
+  const instagramMetadata =
+    normalizedService === "instagram"
+      ? `
+          metadata: {
+            instagram: {
+              type: post
+            }
+          }
+        `
+      : "";
+
   const mutation = `
     mutation CreateImagePost(
       $channelId: ChannelId!,
@@ -336,6 +367,7 @@ async function createImagePost(
           text: $text
           schedulingType: automatic
           mode: shareNow
+
           assets: [
             {
               image: {
@@ -343,6 +375,8 @@ async function createImagePost(
               }
             }
           ]
+
+          ${instagramMetadata}
         }
       ) {
         ... on PostActionSuccess {
@@ -719,12 +753,13 @@ export async function POST(request: Request) {
             continue;
           }
 
-          response = await createVideoPost(
-            apiKey,
-            channel.id,
-            caption,
-            videoUrl
-          );
+            response = await createVideoPost(
+              apiKey,
+              channel.id,
+              caption,
+              videoUrl,
+              channel.service
+            );
 
           if (response.errors?.length) {
             results.push({
@@ -796,12 +831,26 @@ if (!imageUrl) {
           continue;
         }
 
-        response = await createImagePost(
-          apiKey,
-          channel.id,
-          caption,
-          imageUrl
-        );
+        if (!imageUrl) {
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: false,
+            error: "This platform requires an image",
+          });
+
+          continue;
+        }
+
+          response = await createImagePost(
+            apiKey,
+            channel.id,
+            caption,
+            imageUrl,
+            channel.service
+          );
 
         if (response.errors?.length) {
           results.push({
