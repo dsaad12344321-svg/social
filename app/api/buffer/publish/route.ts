@@ -117,7 +117,8 @@ function getYoutubeTitle(
 async function bufferRequest<T = any>(
   apiKey: string,
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  operationName?: string
 ): Promise<BufferGraphQLResponse<T>> {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
@@ -146,7 +147,10 @@ async function bufferRequest<T = any>(
     );
   }
 
-  console.log("Buffer response:", JSON.stringify(data, null, 2));
+  console.log(
+    `=== BUFFER ${operationName || "REQUEST"} ===`,
+    JSON.stringify(data, null, 2)
+  );
 
   return data;
 }
@@ -174,7 +178,7 @@ async function getChannels(
           name: string;
         }>;
       };
-    }>(apiKey, organizationsQuery);
+    }>(apiKey, organizationsQuery, undefined, "GET_ORGANIZATIONS");
 
   if (organizationsResponse.errors?.length) {
     throw new Error(
@@ -220,9 +224,14 @@ async function getChannels(
         isDisconnected?: boolean;
         isLocked?: boolean;
       }>;
-    }>(apiKey, channelsQuery, {
-      organizationId: organization.id,
-    });
+    }>(
+      apiKey,
+      channelsQuery,
+      {
+        organizationId: organization.id,
+      },
+      "GET_CHANNELS"
+    );
 
     if (response.errors?.length) {
       console.error(
@@ -414,11 +423,16 @@ async function createImagePost(
         )
       );
 
-    const response = await bufferRequest(apiKey, mutation, {
-      channelId,
-      text: caption,
-      imageUrl,
-    });
+    const response = await bufferRequest(
+      apiKey,
+      mutation,
+      {
+        channelId,
+        text: caption,
+        imageUrl,
+      },
+      "CREATE_INSTAGRAM_IMAGE_POST"
+    );
 
     console.log(
       "=== INSTAGRAM IMAGE CREATE POST RESPONSE ===",
@@ -485,13 +499,16 @@ async function createYoutubePost(
     }
   `;
 
-  return bufferRequest(apiKey, mutation, {
-    channelId,
-    text: caption,
-    videoUrl,
-    youtubeTitle,
-    categoryId: "27",
-  });
+    return bufferRequest(
+      apiKey,
+      mutation,
+      {
+        channelId,
+        text: caption,
+        videoUrl,
+      },
+      "CREATE_VIDEO_POST"
+    );
 }
 
 export async function POST(request: Request) {
