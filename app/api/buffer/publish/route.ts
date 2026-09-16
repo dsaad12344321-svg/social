@@ -269,7 +269,7 @@ async function createVideoPost(
 ) {
   const normalizedService = normalizeService(service);
 
-  const instagramMetadata =
+  const metadata =
     normalizedService === "instagram"
       ? `
           metadata: {
@@ -279,7 +279,15 @@ async function createVideoPost(
             }
           }
         `
-      : "";
+      : normalizedService === "facebook"
+        ? `
+          metadata: {
+            facebook: {
+              type: reel
+            }
+          }
+        `
+        : "";
 
   const mutation = `
     mutation CreateVideoPost(
@@ -302,7 +310,7 @@ async function createVideoPost(
             }
           ]
 
-          ${instagramMetadata}
+          ${metadata}
         }
       ) {
         ... on PostActionSuccess {
@@ -324,11 +332,16 @@ async function createVideoPost(
     }
   `;
 
-  return bufferRequest(apiKey, mutation, {
-    channelId,
-    text: caption,
-    videoUrl,
-  });
+  return bufferRequest(
+    apiKey,
+    mutation,
+    {
+      channelId,
+      text: caption,
+      videoUrl,
+    },
+    `CREATE_${normalizedService.toUpperCase()}_VIDEO_POST`
+  );
 }
 
 function isImagePlatform(channel: BufferChannel): boolean {
@@ -354,7 +367,7 @@ async function createImagePost(
 ) {
   const normalizedService = normalizeService(service);
 
-  const instagramMetadata =
+  const metadata =
     normalizedService === "instagram"
       ? `
           metadata: {
@@ -364,7 +377,15 @@ async function createImagePost(
             }
           }
         `
-      : "";
+      : normalizedService === "facebook"
+        ? `
+          metadata: {
+            facebook: {
+              type: post
+            }
+          }
+        `
+        : "";
 
   const mutation = `
     mutation CreateImagePost(
@@ -387,7 +408,7 @@ async function createImagePost(
             }
           ]
 
-          ${instagramMetadata}
+          ${metadata}
         }
       ) {
         ... on PostActionSuccess {
@@ -409,38 +430,38 @@ async function createImagePost(
     }
   `;
 
-        console.log(
-        "=== INSTAGRAM IMAGE PUBLISH INPUT ===",
-        JSON.stringify(
-          {
-            channelId,
-            service,
-            imageUrl,
-            caption,
-          },
-          null,
-          2
-        )
-      );
-
-    const response = await bufferRequest(
-      apiKey,
-      mutation,
+  console.log(
+    `=== ${normalizedService.toUpperCase()} IMAGE PUBLISH INPUT ===`,
+    JSON.stringify(
       {
         channelId,
-        text: caption,
+        service,
         imageUrl,
+        caption,
       },
-      "CREATE_INSTAGRAM_IMAGE_POST"
-    );
+      null,
+      2
+    )
+  );
 
-    console.log(
-      "=== INSTAGRAM IMAGE CREATE POST RESPONSE ===",
-      JSON.stringify(response, null, 2)
-    );
+  const response = await bufferRequest(
+    apiKey,
+    mutation,
+    {
+      channelId,
+      text: caption,
+      imageUrl,
+    },
+    `CREATE_${normalizedService.toUpperCase()}_IMAGE_POST`
+  );
 
-    return response;
-    }
+  console.log(
+    `=== ${normalizedService.toUpperCase()} IMAGE CREATE POST RESPONSE ===`,
+    JSON.stringify(response, null, 2)
+  );
+
+  return response;
+}
 
 async function createYoutubePost(
   apiKey: string,
@@ -774,66 +795,67 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // Instagram video = Reel
-        // TikTok video = Video
-        if (
-          videoUrl &&
-          (
-            normalizeService(channel.service) === "instagram" ||
-            normalizeService(channel.service) === "tiktok"
-          )
-        ) {
+// Instagram video = Reel
+// Facebook video = Reel
+// TikTok video = Video
+if (
+  videoUrl &&
+  (
+    normalizeService(channel.service) === "instagram" ||
+    normalizeService(channel.service) === "facebook" ||
+    normalizeService(channel.service) === "tiktok"
+  )
+) {
+  response = await createVideoPost(
+    apiKey,
+    channel.id,
+    caption,
+    videoUrl,
+    channel.service
+  );
 
-            response = await createVideoPost(
-              apiKey,
-              channel.id,
-              caption,
-              videoUrl,
-              channel.service
-            );
+  if (response.errors?.length) {
+    results.push({
+      channelId: channel.id,
+      channelName: channel.name,
+      service: channel.service,
+      account: channel.account,
+      success: false,
+      error: response.errors
+        .map((error) => error.message)
+        .join("; "),
+    });
 
-          if (response.errors?.length) {
-            results.push({
-              channelId: channel.id,
-              channelName: channel.name,
-              service: channel.service,
-              account: channel.account,
-              success: false,
-              error: response.errors
-                .map((error) => error.message)
-                .join("; "),
-            });
+    continue;
+  }
 
-            continue;
-          }
+  const payload = response.data?.createPost;
 
-          const payload = response.data?.createPost;
+  if (payload?.message) {
+    results.push({
+      channelId: channel.id,
+      channelName: channel.name,
+      service: channel.service,
+      account: channel.account,
+      success: false,
+      error: payload.message,
+    });
 
-          if (payload?.message) {
-            results.push({
-              channelId: channel.id,
-              channelName: channel.name,
-              service: channel.service,
-              account: channel.account,
-              success: false,
-              error: payload.message,
-            });
+    continue;
+  }
 
-            continue;
-          }
+  results.push({
+    channelId: channel.id,
+    channelName: channel.name,
+    service: channel.service,
+    account: channel.account,
+    success: true,
+    postId: payload?.post?.id,
+    status: payload?.post?.status,
+  });
 
-          results.push({
-            channelId: channel.id,
-            channelName: channel.name,
-            service: channel.service,
-            account: channel.account,
-            success: true,
-            postId: payload?.post?.id,
-            status: payload?.post?.status,
-          });
-
-          continue;
-        }
+  continue;
+}
 
 // الجزء الموجود أصلاً بعده
 if (!imageUrl) {
