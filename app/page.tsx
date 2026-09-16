@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { upload } from "@vercel/blob/client";
+
 type Source = "certificates" | "deposits" | "treasury";
 
 type Platform =
@@ -141,108 +143,86 @@ const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>(
 const [loadingChannels, setLoadingChannels] = useState(false);
 
 async function handleMediaUpload(
-event: React.ChangeEvent<HTMLInputElement>
+  event: React.ChangeEvent<HTMLInputElement>
 ) {
-const file = event.target.files?.[0];
+  const file = event.target.files?.[0];
 
-if (!file) {
-  return;
-}
+  if (!file) {
+    return;
+  }
 
-if (
-  !file.type.startsWith("image/") &&
-  !file.type.startsWith("video/")
-) {
-  alert("من فضلك اختر صورة أو فيديو فقط");
-  event.target.value = "";
-  return;
-}
+  if (
+    !file.type.startsWith("image/") &&
+    !file.type.startsWith("video/")
+  ) {
+    alert("من فضلك اختر صورة أو فيديو فقط");
+    event.target.value = "";
+    return;
+  }
 
-const detectedType: MediaType = file.type.startsWith("video/")
-  ? "video"
-  : "image";
+  const detectedType: MediaType = file.type.startsWith("video/")
+    ? "video"
+    : "image";
 
-if (
-  platforms.includes("YouTube") &&
-  detectedType !== "video"
-) {
-  alert("عند اختيار YouTube يجب رفع فيديو");
-  event.target.value = "";
-  return;
-}
+  if (
+    platforms.includes("YouTube") &&
+    detectedType !== "video"
+  ) {
+    alert("عند اختيار YouTube يجب رفع فيديو");
+    event.target.value = "";
+    return;
+  }
 
-setUploadingMedia(true);
+  setUploadingMedia(true);
 
-try {
-  const reader = new FileReader();
+  try {
+    console.log("=== DIRECT BLOB UPLOAD START ===");
+    console.log({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      sizeMB: (file.size / 1024 / 1024).toFixed(2),
+    });
 
-  reader.onload = async () => {
-    try {
-      const dataUrl = reader.result;
+    const blob = await upload(
+      `social/${Date.now()}-${file.name}`,
+      file,
+      {
+        access: "public",
+        handleUploadUrl: "/api/upload",
+        multipart: true,
 
-      if (typeof dataUrl !== "string") {
-        throw new Error("Invalid media");
-      }
-
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+        onUploadProgress(event) {
+          console.log(
+            `Upload progress: ${event.percentage.toFixed(0)}%`
+          );
         },
-        body: JSON.stringify({
-          media: dataUrl,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data?.error || "فشل رفع الملف"
-        );
       }
+    );
 
-      setMedia(data.url);
-      setMediaType(detectedType);
+    console.log("=== DIRECT BLOB UPLOAD SUCCESS ===");
+    console.log(blob);
 
-      alert(
-        detectedType === "video"
-          ? "تم رفع الفيديو بنجاح"
-          : "تم رفع الصورة بنجاح"
-      );
-    } catch (error) {
-      console.error("Media upload error:", error);
+    setMedia(blob.url);
+    setMediaType(detectedType);
 
-      alert(
-        error instanceof Error
-          ? error.message
-          : "فشل رفع الملف"
-      );
-    } finally {
-      setUploadingMedia(false);
-    }
-  };
+    alert(
+      detectedType === "video"
+        ? "تم رفع الفيديو بنجاح"
+        : "تم رفع الصورة بنجاح"
+    );
+  } catch (error) {
+    console.error("Direct media upload error:", error);
 
-  reader.onerror = () => {
+    alert(
+      error instanceof Error
+        ? error.message
+        : "فشل رفع الملف"
+    );
+  } finally {
     setUploadingMedia(false);
-    alert("فشل قراءة الملف");
-  };
-
-  reader.readAsDataURL(file);
-} catch (error) {
-  console.error(error);
-
-  setUploadingMedia(false);
-
-  alert(
-    error instanceof Error
-      ? error.message
-      : "فشل رفع الملف"
-  );
-} finally {
-  event.target.value = "";
-}
-
+    event.target.value = "";
+  }
 }
 
 const availablePlatforms = useMemo(() => {
