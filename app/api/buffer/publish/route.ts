@@ -700,74 +700,74 @@ export async function POST(request: Request) {
           continue;
         }
 
-  // Instagram video = Reel
-  // TikTok video = Video
-  if (
-    normalizeService(channel.service) === "instagram" ||
-    normalizeService(channel.service) === "tiktok"
-  ) {
-    if (!videoUrl) {
-      results.push({
-        channelId: channel.id,
-        channelName: channel.name,
-        service: channel.service,
-        account: channel.account,
-        success: false,
-        error: "TikTok requires a video",
-      });
+        // Instagram video = Reel
+        // TikTok video = Video
+        if (
+          normalizeService(channel.service) === "instagram" ||
+          normalizeService(channel.service) === "tiktok"
+        ) {
+          if (!videoUrl) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: `${channel.service} requires a video`,
+            });
 
-      continue;
-    }
+            continue;
+          }
 
-  response = await createVideoPost(
-    apiKey,
-    channel.id,
-    caption,
-    videoUrl
-  );
+          response = await createVideoPost(
+            apiKey,
+            channel.id,
+            caption,
+            videoUrl
+          );
 
-  if (response.errors?.length) {
-    results.push({
-      channelId: channel.id,
-      channelName: channel.name,
-      service: channel.service,
-      account: channel.account,
-      success: false,
-      error: response.errors
-        .map((error) => error.message)
-        .join("; "),
-    });
+          if (response.errors?.length) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: response.errors
+                .map((error) => error.message)
+                .join("; "),
+            });
 
-    continue;
-  }
+            continue;
+          }
 
-  const payload = response.data?.createPost;
+          const payload = response.data?.createPost;
 
-  if (payload?.message) {
-    results.push({
-      channelId: channel.id,
-      channelName: channel.name,
-      service: channel.service,
-      account: channel.account,
-      success: false,
-      error: payload.message,
-    });
+          if (payload?.message) {
+            results.push({
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              success: false,
+              error: payload.message,
+            });
 
-    continue;
-  }
+            continue;
+          }
 
-  results.push({
-    channelId: channel.id,
-    channelName: channel.name,
-    service: channel.service,
-    account: channel.account,
-    success: true,
-    postId: payload?.post?.id,
-    status: payload?.post?.status,
-  });
+          results.push({
+            channelId: channel.id,
+            channelName: channel.name,
+            service: channel.service,
+            account: channel.account,
+            success: true,
+            postId: payload?.post?.id,
+            status: payload?.post?.status,
+          });
 
-  continue;
-}
+          continue;
+        }
 
 // الجزء الموجود أصلاً بعده
 if (!imageUrl) {
