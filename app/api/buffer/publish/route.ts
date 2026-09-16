@@ -251,6 +251,59 @@ function isYoutubeChannel(channel: BufferChannel): boolean {
   return normalizeService(channel.service) === "youtube";
 }
 
+async function createVideoPost(
+  apiKey: string,
+  channelId: string,
+  caption: string,
+  videoUrl: string
+) {
+  const mutation = `
+    mutation CreateVideoPost(
+      $channelId: ChannelId!,
+      $text: String!,
+      $videoUrl: String!
+    ) {
+      createPost(
+        input: {
+          channelId: $channelId
+          text: $text
+          schedulingType: automatic
+          mode: shareNow
+          assets: [
+            {
+              video: {
+                url: $videoUrl
+              }
+            }
+          ]
+        }
+      ) {
+        ... on PostActionSuccess {
+          post {
+            id
+            text
+            status
+            assets {
+              id
+              mimeType
+            }
+          }
+        }
+
+        ... on MutationError {
+          message
+        }
+      }
+    }
+  `;
+
+  return bufferRequest(apiKey, mutation, {
+    channelId,
+    text: caption,
+    videoUrl,
+  });
+}
+
 function isImagePlatform(channel: BufferChannel): boolean {
   const service = normalizeService(channel.service);
 
@@ -647,18 +700,84 @@ export async function POST(request: Request) {
           continue;
         }
 
-        if (!imageUrl) {
-          results.push({
-            channelId: channel.id,
-            channelName: channel.name,
-            service: channel.service,
-            account: channel.account,
-            success: false,
-            error: "This platform requires an image",
-          });
+  // معالجة TikTok للفيديو
+  if (normalizeService(channel.service) === "tiktok") {
+    if (!videoUrl) {
+      results.push({
+        channelId: channel.id,
+        channelName: channel.name,
+        service: channel.service,
+        account: channel.account,
+        success: false,
+        error: "TikTok requires a video",
+      });
 
-          continue;
-        }
+      continue;
+    }
+
+  response = await createVideoPost(
+    apiKey,
+    channel.id,
+    caption,
+    videoUrl
+  );
+
+  if (response.errors?.length) {
+    results.push({
+      channelId: channel.id,
+      channelName: channel.name,
+      service: channel.service,
+      account: channel.account,
+      success: false,
+      error: response.errors
+        .map((error) => error.message)
+        .join("; "),
+    });
+
+    continue;
+  }
+
+  const payload = response.data?.createPost;
+
+  if (payload?.message) {
+    results.push({
+      channelId: channel.id,
+      channelName: channel.name,
+      service: channel.service,
+      account: channel.account,
+      success: false,
+      error: payload.message,
+    });
+
+    continue;
+  }
+
+  results.push({
+    channelId: channel.id,
+    channelName: channel.name,
+    service: channel.service,
+    account: channel.account,
+    success: true,
+    postId: payload?.post?.id,
+    status: payload?.post?.status,
+  });
+
+  continue;
+}
+
+// الجزء الموجود أصلاً بعده
+if (!imageUrl) {
+  results.push({
+    channelId: channel.id,
+    channelName: channel.name,
+    service: channel.service,
+    account: channel.account,
+    success: false,
+    error: "This platform requires an image",
+  });
+
+  continue;
+}
 
         if (!isImagePlatform(channel)) {
           results.push({
