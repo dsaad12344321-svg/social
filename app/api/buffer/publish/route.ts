@@ -777,21 +777,12 @@ export async function POST(request: Request) {
         // Instagram video = Reel
         // TikTok video = Video
         if (
-          normalizeService(channel.service) === "instagram" ||
-          normalizeService(channel.service) === "tiktok"
+          videoUrl &&
+          (
+            normalizeService(channel.service) === "instagram" ||
+            normalizeService(channel.service) === "tiktok"
+          )
         ) {
-          if (!videoUrl) {
-            results.push({
-              channelId: channel.id,
-              channelName: channel.name,
-              service: channel.service,
-              account: channel.account,
-              success: false,
-              error: `${channel.service} requires a video`,
-            });
-
-            continue;
-          }
 
             response = await createVideoPost(
               apiKey,
