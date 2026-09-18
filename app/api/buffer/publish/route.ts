@@ -49,7 +49,7 @@ function normalizeService(service: string): string {
  */
 function getYoutubeTitle(caption: string): string {
   const title = caption
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   if (!title) {
