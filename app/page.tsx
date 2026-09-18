@@ -154,6 +154,7 @@ const [loadingChannels, setLoadingChannels] = useState(false);
 
 const [mediaLibrary, setMediaLibrary] = useState<DriveMedia[]>([]);
 const [loadingMediaLibrary, setLoadingMediaLibrary] = useState(false);
+const [mediaLibraryRefresh, setMediaLibraryRefresh] = useState(0);
 
 async function handleMediaUpload(
   event: React.ChangeEvent<HTMLInputElement>
@@ -537,7 +538,7 @@ useEffect(() => {
   }
 
   loadMediaLibrary();
-}, [section]);
+}, [section, mediaLibraryRefresh]);
 
 useEffect(() => {
 async function loadBufferChannels() {
@@ -1571,7 +1572,7 @@ return (
           </div>
           <button
             className="library-refresh"
-            onClick={() => setSection("Content")}
+            onClick={() => setMediaLibraryRefresh((value) => value + 1)}
             disabled={loadingMediaLibrary}
           >
             {loadingMediaLibrary ? "جاري التحديث..." : "تحديث"}
