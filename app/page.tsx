@@ -261,61 +261,114 @@ async function handleMediaUpload(
      * The 500 MB file does NOT pass through Next.js.
      * --------------------------------------------------
      */
-    const uploadResponse =
-      await fetch(sessionUrl, {
-        method: "PUT",
+    let googleUploadError: unknown = null;
 
-        headers: {
-          "Content-Type":
-            file.type,
-        },
+try {
+  const uploadResponse =
+    await fetch(sessionUrl, {
+      method: "PUT",
 
-        body: file,
-      });
+      headers: {
+        "Content-Type":
+          file.type,
+      },
 
-   if (!uploadResponse.ok) {
-  const errorText =
-    await uploadResponse.text();
+      body: file,
+    });
 
-  console.error(
-    "Google Drive generator upload failed:",
-    uploadResponse.status,
-    errorText
+  console.log(
+    "Google Drive upload response status:",
+    uploadResponse.status
   );
 
-  throw new Error(
-    `فشل رفع صورة Generator إلى Google Drive (${uploadResponse.status})`
+  if (!uploadResponse.ok) {
+    const errorText =
+      await uploadResponse.text();
+
+    console.error(
+      "Google Drive upload failed:",
+      uploadResponse.status,
+      errorText
+    );
+
+    googleUploadError =
+      new Error(
+        `فشل رفع الملف إلى Google Drive (${uploadResponse.status})`
+      );
+  }
+} catch (error) {
+  console.warn(
+    "Google Drive response could not be read. Looking up uploaded file...",
+    error
   );
+
+  googleUploadError = error;
 }
 
 let uploadedFile: any = null;
 
-try {
-  const responseText =
-    await uploadResponse.text();
+for (
+  let attempt = 0;
+  attempt < 6;
+  attempt++
+) {
+  try {
+    const lookupResponse =
+      await fetch("/api/upload", {
+        method: "POST",
 
-  console.log(
-    "Google Drive upload response:",
-    responseText
-  );
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
 
-  if (responseText) {
-    uploadedFile =
-      JSON.parse(responseText);
+        body: JSON.stringify({
+          action: "find",
+          name: initData.name,
+        }),
+      });
+
+    const lookupData =
+      await lookupResponse.json();
+
+    console.log(
+      `Google Drive lookup attempt ${
+        attempt + 1
+      }:`,
+      lookupData
+    );
+
+    if (
+      lookupResponse.ok &&
+      lookupData.success &&
+      lookupData.found &&
+      lookupData.fileId
+    ) {
+      uploadedFile =
+        lookupData;
+
+      break;
+    }
+  } catch (error) {
+    console.warn(
+      "Google Drive lookup attempt failed:",
+      error
+    );
   }
-} catch (error) {
-  console.error(
-    "Failed to read Google Drive upload response:",
-    error
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, 1000)
   );
 }
 
 const fileId =
-  uploadedFile?.id;
+  uploadedFile?.fileId;
 
 if (!fileId) {
   throw new Error(
-    "تم رفع الصورة إلى Google Drive، لكن لم يتم الحصول على File ID من استجابة Google."
+    googleUploadError
+      ? "تم رفع الملف أو محاولة رفعه إلى Google Drive، ولكن تعذر العثور عليه بعد الرفع."
+      : "تم رفع الملف إلى Google Drive، ولكن تعذر العثور على File ID."
   );
 }
 

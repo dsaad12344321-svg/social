@@ -60,6 +60,15 @@ export async function POST(
 ): Promise<Response> {
   try {
     const body = await request.json();
+    if (
+    body?.action === "find" &&
+    typeof body?.name === "string" &&
+    body.name.trim()
+  ) {
+    return await findUploadedFile(
+      body.name.trim()
+    );
+  }
 
     /*
      * --------------------------------------------------
@@ -147,12 +156,15 @@ export async function POST(
     const folderId =
       getDriveFolderId();
 
+    const uploadName =
+      `${crypto.randomUUID()}-${name}`;
+
     const metadata: {
       name: string;
       mimeType: string;
       parents?: string[];
     } = {
-      name,
+      name: uploadName,
       mimeType,
     };
 
@@ -213,7 +225,8 @@ export async function POST(
     return Response.json({
       success: true,
       sessionUrl,
-      name,
+      name: uploadName,
+      originalName: name,
       mimeType,
       size,
     });
@@ -687,6 +700,121 @@ async function importRemoteMedia(
     );
   }
 }
+
+async function findUploadedFile(
+  name: string
+): Promise<Response> {
+  try {
+    const accessToken =
+      await getGoogleAccessToken();
+
+    const folderId =
+      getDriveFolderId();
+
+    const escapedName =
+      name.replace(/'/g, "\\'");
+
+    let query =
+      `name = '${escapedName}' and trashed = false`;
+
+    if (folderId) {
+      query +=
+        ` and '${folderId}' in parents`;
+    }
+
+    const url =
+      new URL(
+        "https://www.googleapis.com/drive/v3/files"
+      );
+
+    url.searchParams.set(
+      "q",
+      query
+    );
+
+    url.searchParams.set(
+      "pageSize",
+      "10"
+    );
+
+    url.searchParams.set(
+      "orderBy",
+      "createdTime desc"
+    );
+
+    url.searchParams.set(
+      "fields",
+      "files(id,name,mimeType,size,createdTime)"
+    );
+
+    const response =
+      await fetch(url.toString(), {
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+        },
+        cache: "no-store",
+      });
+
+    if (!response.ok) {
+      const errorText =
+        await response.text();
+
+      console.error(
+        "Google Drive file lookup error:",
+        response.status,
+        errorText
+      );
+
+      return jsonError(
+        "Failed to find uploaded file in Google Drive.",
+        500
+      );
+    }
+
+    const data =
+      await response.json();
+
+    const file =
+      data?.files?.[0];
+
+    if (!file?.id) {
+      return Response.json({
+        success: false,
+        found: false,
+      });
+    }
+
+    return Response.json({
+      success: true,
+      found: true,
+      fileId: file.id,
+      name: file.name,
+      mimeType: file.mimeType,
+      size: file.size,
+      url: getMediaUrl(file.id),
+      mediaType:
+        file.mimeType?.startsWith("video/")
+          ? "video"
+          : "image",
+    });
+  } catch (error) {
+    console.error(
+      "Google Drive file lookup exception:",
+      error
+    );
+
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "Failed to find uploaded file.",
+      500
+    );
+  }
+}
+
+
+
 
 function getFilenameFromUrl(
   url: URL,
