@@ -47,72 +47,19 @@ function normalizeService(service: string): string {
  * The dashboard does not expose a title field.
  * The title is selected automatically from this list.
  */
-function getYoutubeTitle(
-  source: Source,
-  caption: string
-): string {
-  const bankNames = [
-    "بنك مصر",
-    "البنك الأهلي المصري",
-    "البنك الأهلي",
-    "بنك القاهرة",
-    "بنك CIB",
-    "CIB",
-    "بنك QNB",
-    "QNB",
-    "بنك الإسكندرية",
-    "بنك SAIB",
-    "بنك فيصل الإسلامي",
-    "بنك البركة",
-    "بنك التعمير والإسكان",
-    "بنك أبو ظبي الإسلامي",
-    "مصرف أبو ظبي الإسلامي",
-  ];
+function getYoutubeTitle(caption: string): string {
+  const title = caption
+    .replace(/\\s+/g, " ")
+    .trim();
 
-  const detectedBank = bankNames.find((bank) =>
-    caption.includes(bank)
-  );
-
-  if (source === "certificates") {
-    const titles = detectedBank
-      ? [
-          `آخر تحديث لشهادات ${detectedBank}`,
-          `أحدث شهادات ${detectedBank}`,
-          `شهادات ${detectedBank} - آخر تحديث`,
-        ]
-      : [
-          "آخر تحديث لشهادات البنوك المصرية",
-          "أحدث شهادات الادخار في البنوك المصرية",
-          "شهادات البنوك المصرية - آخر تحديث",
-        ];
-
-    return titles[Math.floor(Math.random() * titles.length)];
+  if (!title) {
+    return "تحديث جديد";
   }
 
-  if (source === "deposits") {
-    const titles = detectedBank
-      ? [
-          `آخر تحديث لودائع ${detectedBank}`,
-          `أحدث ودائع ${detectedBank}`,
-          `ودائع ${detectedBank} - آخر تحديث`,
-        ]
-      : [
-          "آخر تحديث لودائع البنوك المصرية",
-          "أحدث ودائع البنوك المصرية",
-          "ودائع البنوك المصرية - آخر تحديث",
-        ];
-
-    return titles[Math.floor(Math.random() * titles.length)];
-  }
-
-  const titles = [
-    "العروض المقبولة لأذون الخزانة",
-    "آخر تحديث لأذون الخزانة المصرية",
-    "أحدث أسعار وعروض أذون الخزانة",
-  ];
-
-  return titles[Math.floor(Math.random() * titles.length)];
+  return title.slice(0, 100);
 }
+
+const YOUTUBE_CATEGORY_ID = "27";
 
 async function bufferRequest<T = any>(
   apiKey: string,
@@ -527,8 +474,10 @@ async function createYoutubePost(
         channelId,
         text: caption,
         videoUrl,
+        youtubeTitle,
+        categoryId: YOUTUBE_CATEGORY_ID,
       },
-      "CREATE_VIDEO_POST"
+      "CREATE_YOUTUBE_VIDEO_POST"
     );
 }
 
@@ -737,10 +686,7 @@ export async function POST(request: Request) {
             continue;
           }
 
-          const youtubeTitle = getYoutubeTitle(
-            source,
-            caption
-          );
+          const youtubeTitle = getYoutubeTitle(caption);
 
           response = await createYoutubePost(
             apiKey,
