@@ -276,12 +276,16 @@ function parseRange(
 
   const value = trimmed.slice(6);
 
-  // This media endpoint intentionally supports one range only.
-  if (value.includes(",")) {
+  // Buffer/video clients can occasionally send multiple ranges.
+  // Google Drive media requests are handled one range at a time, so
+  // use the first range instead of rejecting the whole request.
+  const firstRange = value.split(",")[0]?.trim();
+
+  if (!firstRange) {
     return { invalid: true };
   }
 
-  const match = /^(\d*)-(\d*)$/.exec(value);
+  const match = /^(\d*)-(\d*)$/.exec(firstRange);
 
   if (!match) {
     return { invalid: true };
