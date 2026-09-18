@@ -1137,13 +1137,39 @@ async function deleteLibraryMedia(item: DriveMedia) {
   }
 }
 
-function useLibraryMedia(item: DriveMedia) {
-  setMedia(item.url);
-  setMediaType(item.mediaType);
-  setSection("Dashboard");
+async function useLibraryMedia(item: DriveMedia) {
+  try {
+    const response = await fetch(item.url, {
+      method: "HEAD",
+      cache: "no-store",
+    });
 
-  if (item.mediaType !== "video" && platforms.includes("YouTube")) {
-    setPlatforms(platforms.filter((platform) => platform !== "YouTube"));
+    if (!response.ok) {
+      if (response.status === 404) {
+        setMediaLibrary((current) =>
+          current.filter((mediaItem) => mediaItem.id !== item.id)
+        );
+        alert("هذا الملف لم يعد متاحًا في Google Drive، لذلك تمت إزالته من مكتبة المحتوى.");
+        return;
+      }
+
+      throw new Error("تعذر الوصول إلى الملف (" + response.status + ")");
+    }
+
+    setMedia(item.url);
+    setMediaType(item.mediaType);
+    setSection("Dashboard");
+
+    if (item.mediaType !== "video" && platforms.includes("YouTube")) {
+      setPlatforms(platforms.filter((platform) => platform !== "YouTube"));
+    }
+  } catch (error) {
+    console.error("Media selection error:", error);
+    alert(
+      error instanceof Error
+        ? error.message
+        : "تعذر الوصول إلى ملف Google Drive."
+    );
   }
 }
 
@@ -1812,9 +1838,34 @@ return (
               <article className={"media-card" + (item.pinned ? " is-pinned" : "")} key={item.id}>
                 <div className="media-card-preview">
                   {item.mediaType === "video" ? (
-                    <video src={item.url} muted playsInline preload="metadata" />
+                    <video
+                      src={item.url}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      onError={(event) => {
+                        const mediaElement = event.currentTarget;
+                        if (mediaElement.dataset.invalidHandled === "true") return;
+                        mediaElement.dataset.invalidHandled = "true";
+                        setMediaLibrary((current) =>
+                          current.filter((mediaItem) => mediaItem.id !== item.id)
+                        );
+                      }}
+                    />
                   ) : (
-                    <img src={item.url} alt={item.name} loading="lazy" />
+                    <img
+                      src={item.url}
+                      alt={item.name}
+                      loading="lazy"
+                      onError={(event) => {
+                        const mediaElement = event.currentTarget;
+                        if (mediaElement.dataset.invalidHandled === "true") return;
+                        mediaElement.dataset.invalidHandled = "true";
+                        setMediaLibrary((current) =>
+                          current.filter((mediaItem) => mediaItem.id !== item.id)
+                        );
+                      }}
+                    />
                   )}
                   {item.pinned && <span className="media-pin-badge" aria-label="مثبت">📌</span>}
                 </div>
