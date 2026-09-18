@@ -33,18 +33,18 @@ const BUFFER_API_URL = "https://api.buffer.com";
 
 function parseRateLimits(headers: Headers): BufferRateLimits {
   const raw = headers.get("ratelimit") || "";
-  const entries = raw.split(/,\s*(?=")/);
-
   const result: BufferRateLimits = {};
 
-  for (const entry of entries) {
-    const windowMatch = entry.match(/"[^"]+"[^;]*;\s*r=(\d+);\s*t=(\d+)/);
-    if (!windowMatch) continue;
+  const matches = raw.match(/"([^"]+)"[^;]*;\\s*r=(\\d+);\\s*t=(\\d+)/g) || [];
 
-    const quotaMatch = entry.match(/^"([^"]+)"/);
-    const name = quotaMatch?.[1] || "";
-    const remaining = Number(windowMatch[1]);
-    const resetSeconds = Number(windowMatch[2]);
+  for (const entry of matches) {
+    const nameMatch = entry.match(/^"([^"]+)"/);
+    const valuesMatch = entry.match(/r=(\\d+);\\s*t=(\\d+)/);
+    if (!nameMatch || !valuesMatch) continue;
+
+    const name = nameMatch[1];
+    const remaining = Number(valuesMatch[1]);
+    const resetSeconds = Number(valuesMatch[2]);
 
     let target: keyof BufferRateLimits | null = null;
     if (name.includes("15min")) target = "fifteenMinutes";
@@ -52,9 +52,7 @@ function parseRateLimits(headers: Headers): BufferRateLimits {
     else if (name.includes("30days")) target = "thirtyDays";
     if (!target) continue;
 
-    const quotaMatchFromName = name.match(/^(\d+)-in-/);
-    const quota = quotaMatchFromName ? Number(quotaMatchFromName[1]) : 0;
-
+    const quotaMatch = name.match(/^(\\d+)-in-/);
     result[target] = {
       windowSeconds:
         target === "fifteenMinutes"
@@ -62,19 +60,13 @@ function parseRateLimits(headers: Headers): BufferRateLimits {
           : target === "oneDay"
           ? 86400
           : 2592000,
-      quota,
+      quota: quotaMatch ? Number(quotaMatch[1]) : 0,
       remaining,
       resetSeconds,
     };
   }
 
-  return {
-    ...result,
-    accountName: accountData?.name || null,
-    accountEmail: accountData?.email || null,
-    accountAvatar: accountData?.avatar || null,
-    rateLimits,
-  };
+  return result;
 }
 
 async function bufferRequest(
@@ -136,26 +128,27 @@ async function getBufferAccount(
   apiKey: string,
   accountNumber: number
 ) {
-  const organizationsQuery = 
+  const organizationsQuery =
     `query GetOrganizations {
       account {
+        id
+        name
+        email
+        avatar
         organizations {
           id
           name
           ownerEmail
         }
       }
-    }`
-  ;
+    }`;
 
-  const organizationsData =
-    await bufferRequest(
-      apiKey,
-      organizationsQuery
-    );
+  const organizationsResult =
+    await bufferRequest(apiKey, organizationsQuery);
 
-  const organizations =
-    organizationsData?.account?.organizations || [];
+  const accountData = organizationsResult.data?.account;
+  const organizations = accountData?.organizations || [];
+  let rateLimits = organizationsResult.rateLimits;
 
   const result = {
     account: accountNumber,
@@ -209,7 +202,7 @@ async function getBufferAccount(
       ownerEmail:
         organization.ownerEmail,
       channels:
-        channelsData?.channels || [],
+        channelsResult.data?.channels || [],
     });
   }
 
