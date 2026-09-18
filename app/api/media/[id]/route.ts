@@ -286,8 +286,18 @@ function getErrorStatus(
 function sanitizeFilename(
   filename: string
 ) {
+  /*
+   * HTTP header values are ByteString values in the
+   * Web Fetch API. Arabic and other Unicode characters
+   * cannot be placed directly in Content-Disposition.
+   *
+   * Keep the header filename ASCII-only so Vercel/Next.js
+   * can construct the response without throwing:
+   * "Cannot convert argument to a ByteString".
+   */
   return filename
     .replace(/[\r\n"]/g, "")
-    .replace(/[^\p{L}\p{N}._ -]/gu, "_")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/[^A-Za-z0-9._ -]/g, "_")
     .slice(0, 180);
 }
