@@ -116,11 +116,18 @@ export async function GET(
     );
 
     if (metadata.name) {
+      const filename = sanitizeFilename(
+        metadata.name
+      );
+
+      const encodedFilename =
+        encodeRFC5987ValueChars(
+          metadata.name
+        );
+
       responseHeaders.set(
         "Content-Disposition",
-        `inline; filename="${sanitizeFilename(
-          metadata.name
-        )}"`
+        `inline; filename="${filename}"; filename*=UTF-8''${encodedFilename}`
       );
     }
 
@@ -287,7 +294,21 @@ function sanitizeFilename(
   filename: string
 ) {
   return filename
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, "_")
     .replace(/[\r\n"]/g, "")
-    .replace(/[^\p{L}\p{N}._ -]/gu, "_")
-    .slice(0, 180);
+    .replace(/\\/g, "_")
+    .slice(0, 180) || "media";
+}
+
+function encodeRFC5987ValueChars(
+  filename: string
+) {
+  return encodeURIComponent(
+    filename
+  ).replace(
+    /['()*]/g,
+    (char) =>
+      `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
 }
