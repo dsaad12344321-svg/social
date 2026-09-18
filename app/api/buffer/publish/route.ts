@@ -777,7 +777,7 @@ export async function POST(request: Request) {
         }
 
 // Instagram video = Reel
-// Facebook video = Reel
+// Facebook video = standard video post
 // TikTok video = Video
 if (
   videoUrl &&
