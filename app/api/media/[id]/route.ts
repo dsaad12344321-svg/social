@@ -67,7 +67,10 @@ export async function GET(
      * portion of the file.
      */
     const range =
-      request.headers.get("range");
+      normalizeRange(
+        request.headers.get("range"),
+        metadata.size
+      );
 
     const driveResponse =
       await drive.files.get(
@@ -196,6 +199,50 @@ export async function GET(
       }
     );
   }
+}
+
+function normalizeRange(
+  range: string | null,
+  size: string | null | undefined
+): string | undefined {
+  if (!range || !size) {
+    return range || undefined;
+  }
+
+  const totalSize = Number(size);
+
+  if (!Number.isFinite(totalSize) || totalSize <= 0) {
+    return undefined;
+  }
+
+  const match =
+    /^bytes=(\\d+)-(\\d*)$/.exec(
+      range.trim()
+    );
+
+  if (!match) {
+    return undefined;
+  }
+
+  const start = Number(match[1]);
+  const end = match[2]
+    ? Number(match[2])
+    : totalSize - 1;
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    start >= totalSize ||
+    end < start
+  ) {
+    return undefined;
+  }
+
+  return `bytes=${start}-${Math.min(
+    end,
+    totalSize - 1
+  )}`;
 }
 
 function getHeader(
