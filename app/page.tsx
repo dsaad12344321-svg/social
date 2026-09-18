@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { upload } from "@vercel/blob/client";
+
 
 type Source = "certificates" | "deposits" | "treasury";
 
@@ -155,20 +155,39 @@ async function handleMediaUpload(
     !file.type.startsWith("image/") &&
     !file.type.startsWith("video/")
   ) {
-    alert("من فضلك اختر صورة أو فيديو فقط");
+    alert(
+      "من فضلك اختر صورة أو فيديو فقط"
+    );
+
     event.target.value = "";
     return;
   }
 
-  const detectedType: MediaType = file.type.startsWith("video/")
-    ? "video"
-    : "image";
+  const detectedType: MediaType =
+    file.type.startsWith("video/")
+      ? "video"
+      : "image";
 
   if (
     platforms.includes("YouTube") &&
     detectedType !== "video"
   ) {
-    alert("عند اختيار YouTube يجب رفع فيديو");
+    alert(
+      "عند اختيار YouTube يجب رفع فيديو"
+    );
+
+    event.target.value = "";
+    return;
+  }
+
+  const MAX_FILE_SIZE =
+    500 * 1024 * 1024;
+
+  if (file.size > MAX_FILE_SIZE) {
+    alert(
+      "حجم الملف يجب ألا يتجاوز 500 MB"
+    );
+
     event.target.value = "";
     return;
   }
@@ -176,34 +195,138 @@ async function handleMediaUpload(
   setUploadingMedia(true);
 
   try {
-    console.log("=== DIRECT BLOB UPLOAD START ===");
+    console.log(
+      "=== GOOGLE DRIVE UPLOAD START ==="
+    );
+
     console.log({
       name: file.name,
       type: file.type,
       size: file.size,
-      sizeMB: (file.size / 1024 / 1024).toFixed(2),
+      sizeMB: (
+        file.size /
+        1024 /
+        1024
+      ).toFixed(2),
     });
 
-    const blob = await upload(
-      `social/${Date.now()}-${file.name}`,
-      file,
-      {
-        access: "public",
-        handleUploadUrl: "/api/upload",
-        multipart: true,
+    /*
+     * --------------------------------------------------
+     * STEP 1
+     *
+     * Ask our server to create a Google Drive
+     * resumable upload session.
+     * --------------------------------------------------
+     */
+    const initResponse =
+      await fetch("/api/upload", {
+        method: "POST",
 
-        onUploadProgress(event) {
-          console.log(
-            `Upload progress: ${event.percentage.toFixed(0)}%`
-          );
+        headers: {
+          "Content-Type":
+            "application/json",
         },
-      }
+
+        body: JSON.stringify({
+          name: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }),
+      });
+
+    const initData =
+      await initResponse.json();
+
+    if (
+      !initResponse.ok ||
+      !initData.success ||
+      !initData.sessionUrl
+    ) {
+      throw new Error(
+        initData.error ||
+          "فشل إنشاء جلسة رفع Google Drive"
+      );
+    }
+
+    const sessionUrl =
+      initData.sessionUrl;
+
+    /*
+     * --------------------------------------------------
+     * STEP 2
+     *
+     * Upload the file directly from the browser
+     * to Google Drive.
+     *
+     * The 500 MB file does NOT pass through Next.js.
+     * --------------------------------------------------
+     */
+    const uploadResponse =
+      await fetch(sessionUrl, {
+        method: "PUT",
+
+        headers: {
+          "Content-Type":
+            file.type,
+        },
+
+        body: file,
+      });
+
+    if (!uploadResponse.ok) {
+      const errorText =
+        await uploadResponse.text();
+
+      console.error(
+        "Google Drive upload failed:",
+        uploadResponse.status,
+        errorText
+      );
+
+      throw new Error(
+        `فشل رفع الملف إلى Google Drive (${uploadResponse.status})`
+      );
+    }
+
+    const uploadedFile =
+      await uploadResponse.json();
+
+    const fileId =
+      uploadedFile?.id;
+
+    if (!fileId) {
+      throw new Error(
+        "تم رفع الملف ولكن Google Drive لم يرجع File ID"
+      );
+    }
+
+    /*
+     * Our application does not expose the Google
+     * Drive URL directly.
+     *
+     * Instead it uses:
+     *
+     * /api/media/{fileId}
+     */
+    const mediaUrl =
+      `/api/media/${encodeURIComponent(
+        fileId
+      )}`;
+
+    console.log(
+      "=== GOOGLE DRIVE UPLOAD SUCCESS ==="
     );
 
-    console.log("=== DIRECT BLOB UPLOAD SUCCESS ===");
-    console.log(blob);
+    console.log({
+      fileId,
+      mediaUrl,
+      name:
+        uploadedFile?.name,
+      mimeType:
+        uploadedFile?.mimeType,
+    });
 
-    setMedia(blob.url);
+    setMedia(mediaUrl);
     setMediaType(detectedType);
 
     alert(
@@ -212,7 +335,10 @@ async function handleMediaUpload(
         : "تم رفع الصورة بنجاح"
     );
   } catch (error) {
-    console.error("Direct media upload error:", error);
+    console.error(
+      "Google Drive media upload error:",
+      error
+    );
 
     alert(
       error instanceof Error
@@ -221,6 +347,7 @@ async function handleMediaUpload(
     );
   } finally {
     setUploadingMedia(false);
+
     event.target.value = "";
   }
 }
