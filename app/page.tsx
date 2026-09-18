@@ -49,6 +49,7 @@ type DriveMedia = {
   createdTime?: string | null;
   url: string;
   mediaType: MediaType;
+  pinned: boolean;
 };
 
 type Post = {
@@ -155,6 +156,8 @@ const [loadingChannels, setLoadingChannels] = useState(false);
 const [mediaLibrary, setMediaLibrary] = useState<DriveMedia[]>([]);
 const [loadingMediaLibrary, setLoadingMediaLibrary] = useState(false);
 const [mediaLibraryRefresh, setMediaLibraryRefresh] = useState(0);
+const [mediaView, setMediaView] = useState<"small" | "medium" | "large">("medium");
+const [mediaActionId, setMediaActionId] = useState<string | null>(null);
 
 async function handleMediaUpload(
   event: React.ChangeEvent<HTMLInputElement>
@@ -197,8 +200,7 @@ async function handleMediaUpload(
   const MAX_FILE_SIZE =
     500 * 1024 * 1024;
 
-  if (file.size > MAX_FILE_SIZE) {
-    alert(
+  if (file.size > MAX_FILE_SIZE) {    alert(
       "حجم الملف يجب ألا يتجاوز 500 MB"
     );
 
@@ -397,8 +399,7 @@ for (
     await new Promise((resolve) =>
       setTimeout(
         resolve,
-        LOOKUP_DELAY_MS
-      )
+        LOOKUP_DELAY_MS      )
     );
   }
 }
@@ -597,8 +598,7 @@ const raw = localStorage.getItem(STORAGE);
 
   const migratedPosts: Post[] = parsed
     .filter(
-      (post) =>
-        post &&
+      (post) =>        post &&
         typeof post === "object" &&
         typeof post.id === "string"
     )
@@ -797,7 +797,6 @@ function openGenerator(
 selectedSource: Source
 ) {
 setSource(selectedSource);
-
 window.open(
   BANKS_URL +
     generators[selectedSource].path,
@@ -997,8 +996,7 @@ try {
         ? {
             ...item,
             status:
-              data.partialSuccess
-                ? "failed"
+              data.partialSuccess                ? "failed"
                 : "published",
             error:
               data.partialSuccess
@@ -1053,6 +1051,57 @@ try {
   setPublishingId(null);
 }
 
+}
+
+const sortedMediaLibrary = useMemo(() => {
+  return [...mediaLibrary].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    const aTime = a.createdTime ? new Date(a.createdTime).getTime() : 0;
+    const bTime = b.createdTime ? new Date(b.createdTime).getTime() : 0;
+    return bTime - aTime;
+  });
+}, [mediaLibrary]);
+
+async function toggleMediaPin(item: DriveMedia) {
+  setMediaActionId(item.id);
+  try {
+    const response = await fetch("/api/media-library", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "pin", fileId: item.id, pinned: !item.pinned }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data?.error || "فشل تحديث حالة التثبيت");
+    setMediaLibrary((current) =>
+      current.map((mediaItem) =>
+        mediaItem.id === item.id ? { ...mediaItem, pinned: data.pinned === true } : mediaItem
+      )
+    );
+  } catch (error) {
+    console.error("Media pin error:", error);
+    alert(error instanceof Error ? error.message : "فشل تحديث حالة التثبيت");
+  } finally {
+    setMediaActionId(null);
+  }
+}
+
+async function deleteLibraryMedia(item: DriveMedia) {
+  setMediaActionId(item.id);
+  try {
+    const response = await fetch("/api/media-library", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", fileId: item.id }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data?.error || "فشل حذف الملف");
+    setMediaLibrary((current) => current.filter((mediaItem) => mediaItem.id !== item.id));
+  } catch (error) {
+    console.error("Media delete error:", error);
+    alert(error instanceof Error ? error.message : "فشل حذف الملف");
+  } finally {
+    setMediaActionId(null);
+  }
 }
 
 function useLibraryMedia(item: DriveMedia) {
@@ -1198,7 +1247,6 @@ return (
                   <h3>
                     {post.title}
                   </h3>
-
                   <p>
                     {post.caption ||
                       "لا يوجد كابشن"}
@@ -1397,8 +1445,7 @@ return (
                     )
                   }
                 >
-                  {platform}
-                </button>
+                  {platform}                </button>
               )
             )
           )}
@@ -1570,13 +1617,21 @@ return (
             <h2>مكتبة المحتوى</h2>
             <p className="muted">كل الصور والفيديوهات الموجودة في Google Drive</p>
           </div>
-          <button
-            className="library-refresh"
-            onClick={() => setMediaLibraryRefresh((value) => value + 1)}
-            disabled={loadingMediaLibrary}
-          >
-            {loadingMediaLibrary ? "جاري التحديث..." : "تحديث"}
-          </button>
+
+          <div className="media-library-tools">
+            <div className="media-view-switcher" aria-label="حجم العرض">
+              <button className={mediaView === "small" ? "active" : ""} onClick={() => setMediaView("small")}>Small</button>
+              <button className={mediaView === "medium" ? "active" : ""} onClick={() => setMediaView("medium")}>Medium</button>
+              <button className={mediaView === "large" ? "active" : ""} onClick={() => setMediaView("large")}>Large</button>
+            </div>
+            <button
+              className="library-refresh"
+              onClick={() => setMediaLibraryRefresh((value) => value + 1)}
+              disabled={loadingMediaLibrary}
+            >
+              {loadingMediaLibrary ? "جاري التحديث..." : "تحديث"}
+            </button>
+          </div>
         </div>
 
         {loadingMediaLibrary ? (
@@ -1584,9 +1639,9 @@ return (
         ) : mediaLibrary.length === 0 ? (
           <div className="library-empty">لا توجد صور أو فيديوهات في Google Drive.</div>
         ) : (
-          <div className="media-library-grid">
-            {mediaLibrary.map((item) => (
-              <article className="media-card" key={item.id}>
+          <div className={"media-library-grid view-" + mediaView}>
+            {sortedMediaLibrary.map((item) => (
+              <article className={"media-card" + (item.pinned ? " is-pinned" : "")} key={item.id}>
                 <div className="media-card-preview">
                   {item.mediaType === "video" ? (
                     <video src={item.url} muted playsInline preload="metadata" />
@@ -1596,6 +1651,7 @@ return (
                   <span className="media-type-badge">
                     {item.mediaType === "video" ? "فيديو" : "صورة"}
                   </span>
+                  {item.pinned && <span className="media-pin-badge">📌 مثبت</span>}
                 </div>
                 <div className="media-card-body">
                   <strong title={item.name}>{item.name}</strong>
@@ -1603,9 +1659,23 @@ return (
                     {item.createdTime ? new Date(item.createdTime).toLocaleDateString("ar-EG") : ""}
                     {item.size ? " · " + formatMediaSize(item.size) : ""}
                   </small>
-                  <button className="use-media-button" onClick={() => useLibraryMedia(item)}>
-                    استخدام هذا الملف
-                  </button>
+                  <div className="media-card-actions">
+                    <button className="use-media-button" onClick={() => useLibraryMedia(item)}>استخدام</button>
+                    <button
+                      className={"pin-media-button" + (item.pinned ? " pinned" : "")}
+                      onClick={() => toggleMediaPin(item)}
+                      disabled={mediaActionId === item.id}
+                    >
+                      {item.pinned ? "إلغاء التثبيت" : "Pin"}
+                    </button>
+                    <button
+                      className="delete-media-button"
+                      onClick={() => deleteLibraryMedia(item)}
+                      disabled={mediaActionId === item.id}
+                    >
+                      حذف
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -1613,6 +1683,7 @@ return (
         )}
       </section>
     )}
+
   </main>
 </div>
 
