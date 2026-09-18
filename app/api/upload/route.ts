@@ -2,7 +2,7 @@ import {
   getGoogleAccessToken,
   getDriveFolderId,
   getMediaUrl,
-} from "../../../../lib/google-drive";
+} from "@/lib/google-drive";
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024;
 

@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 
-import { getDriveClient } from "../../../../../lib/google-drive";
+import { getDriveClient } from "@/lib/google-drive";
 
 type RouteContext = {
   params: Promise<{
