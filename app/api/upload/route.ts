@@ -64,17 +64,29 @@ export async function POST(
     /*
      * --------------------------------------------------
      * MODE 1
-     * Import a remote image URL into Google Drive.
+     * Import media into Google Drive.
      *
-     * The existing app/page.tsx uses this when an image
-     * comes from the bank poster generator.
+     * Supports:
+     *
+     * - Base64 data URLs
+     * - HTTP/HTTPS URLs
      * --------------------------------------------------
      */
     if (
       typeof body?.media === "string" &&
       body.media.length > 0
     ) {
-      return await importRemoteMedia(body.media);
+      if (
+        body.media.startsWith("data:image/")
+      ) {
+        return await importDataUrl(
+          body.media
+        );
+      }
+
+      return await importRemoteMedia(
+        body.media
+      );
     }
 
     /*
@@ -219,6 +231,228 @@ export async function POST(
     );
   }
 }
+
+
+/**
+ * Import a Base64 data URL into Google Drive.
+ *
+ * Used by the bank poster generators.
+ */
+async function importDataUrl(
+  dataUrl: string
+): Promise<Response> {
+  try {
+    const match =
+      dataUrl.match(
+        /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/
+      );
+
+    if (!match) {
+      return jsonError(
+        "Invalid Base64 image data."
+      );
+    }
+
+    const contentType = match[1];
+    const base64Data = match[2];
+
+    if (!isAllowedMimeType(contentType)) {
+      return jsonError(
+        `Unsupported image type: ${contentType}`
+      );
+    }
+
+    const buffer =
+      Buffer.from(
+        base64Data,
+        "base64"
+      );
+
+    if (!buffer.length) {
+      return jsonError(
+        "The Base64 image is empty."
+      );
+    }
+
+    if (
+      buffer.length >
+      MAX_FILE_SIZE
+    ) {
+      return jsonError(
+        "Image is larger than the 500 MB limit."
+      );
+    }
+
+    const extension =
+      contentType === "image/png"
+        ? "png"
+        : contentType === "image/webp"
+        ? "webp"
+        : contentType === "image/gif"
+        ? "gif"
+        : contentType === "image/jpeg"
+        ? "jpg"
+        : "jpg";
+
+    const filename =
+      `generator-${Date.now()}.${extension}`;
+
+    const accessToken =
+      await getGoogleAccessToken();
+
+    const folderId =
+      getDriveFolderId();
+
+    const metadata: {
+      name: string;
+      mimeType: string;
+      parents?: string[];
+    } = {
+      name: filename,
+      mimeType: contentType,
+    };
+
+    if (folderId) {
+      metadata.parents = [folderId];
+    }
+
+    /*
+     * STEP 1
+     * Create Google Drive resumable upload session.
+     */
+    const sessionResponse =
+      await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable",
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${accessToken}`,
+
+            "Content-Type":
+              "application/json; charset=UTF-8",
+
+            "X-Upload-Content-Type":
+              contentType,
+
+            "X-Upload-Content-Length":
+              String(buffer.length),
+          },
+
+          body:
+            JSON.stringify(metadata),
+        }
+      );
+
+    if (!sessionResponse.ok) {
+      const errorText =
+        await sessionResponse.text();
+
+      console.error(
+        "Google Drive Base64 session error:",
+        sessionResponse.status,
+        errorText
+      );
+
+      return jsonError(
+        `Failed to create Google Drive upload session (${sessionResponse.status}).`,
+        500
+      );
+    }
+
+    const sessionUrl =
+      sessionResponse.headers.get(
+        "location"
+      );
+
+    if (!sessionUrl) {
+      return jsonError(
+        "Google Drive did not return an upload session URL.",
+        500
+      );
+    }
+
+    /*
+     * STEP 2
+     * Upload the decoded image from our server
+     * to Google Drive.
+     *
+     * No browser -> Google Drive request.
+     * Therefore no browser CORS problem.
+     */
+    const uploadResponse =
+      await fetch(sessionUrl, {
+        method: "PUT",
+
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+
+          "Content-Type":
+            contentType,
+
+          "Content-Length":
+            String(buffer.length),
+        },
+
+        body: buffer,
+      });
+
+    if (!uploadResponse.ok) {
+      const errorText =
+        await uploadResponse.text();
+
+      console.error(
+        "Google Drive Base64 upload error:",
+        uploadResponse.status,
+        errorText
+      );
+
+      return jsonError(
+        `Failed to upload image to Google Drive (${uploadResponse.status}).`,
+        500
+      );
+    }
+
+    const uploadedFile =
+      await uploadResponse.json();
+
+    const fileId =
+      uploadedFile?.id;
+
+    if (!fileId) {
+      return jsonError(
+        "Google Drive upload completed but no file ID was returned.",
+        500
+      );
+    }
+
+    return Response.json({
+      success: true,
+      fileId,
+      url: getMediaUrl(fileId),
+      mediaType: "image",
+      mimeType: contentType,
+      name: filename,
+    });
+  } catch (error) {
+    console.error(
+      "Base64 media import error:",
+      error
+    );
+
+    return jsonError(
+      error instanceof Error
+        ? error.message
+        : "Failed to import Base64 image into Google Drive.",
+      500
+    );
+  }
+}
+
+
+
 
 /**
  * Import a remote image into Google Drive.

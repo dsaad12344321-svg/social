@@ -273,32 +273,51 @@ async function handleMediaUpload(
         body: file,
       });
 
-    if (!uploadResponse.ok) {
-      const errorText =
-        await uploadResponse.text();
+   if (!uploadResponse.ok) {
+  const errorText =
+    await uploadResponse.text();
 
-      console.error(
-        "Google Drive upload failed:",
-        uploadResponse.status,
-        errorText
-      );
+  console.error(
+    "Google Drive generator upload failed:",
+    uploadResponse.status,
+    errorText
+  );
 
-      throw new Error(
-        `فشل رفع الملف إلى Google Drive (${uploadResponse.status})`
-      );
-    }
+  throw new Error(
+    `فشل رفع صورة Generator إلى Google Drive (${uploadResponse.status})`
+  );
+}
 
-    const uploadedFile =
-      await uploadResponse.json();
+let uploadedFile: any = null;
 
-    const fileId =
-      uploadedFile?.id;
+try {
+  const responseText =
+    await uploadResponse.text();
 
-    if (!fileId) {
-      throw new Error(
-        "تم رفع الملف ولكن Google Drive لم يرجع File ID"
-      );
-    }
+  console.log(
+    "Google Drive upload response:",
+    responseText
+  );
+
+  if (responseText) {
+    uploadedFile =
+      JSON.parse(responseText);
+  }
+} catch (error) {
+  console.error(
+    "Failed to read Google Drive upload response:",
+    error
+  );
+}
+
+const fileId =
+  uploadedFile?.id;
+
+if (!fileId) {
+  throw new Error(
+    "تم رفع الصورة إلى Google Drive، لكن لم يتم الحصول على File ID من استجابة Google."
+  );
+}
 
     /*
      * Our application does not expose the Google
@@ -309,9 +328,10 @@ async function handleMediaUpload(
      * /api/media/{fileId}
      */
     const mediaUrl =
-      `/api/media/${encodeURIComponent(
-        fileId
-      )}`;
+      new URL(
+        `/api/media/${encodeURIComponent(fileId)}`,
+        window.location.origin
+      ).toString();
 
     console.log(
       "=== GOOGLE DRIVE UPLOAD SUCCESS ==="
@@ -502,102 +522,128 @@ error
 }, [posts]);
 
 useEffect(() => {
-const onMessage = async (
-event: MessageEvent
-) => {
-const data = event.data;
-
-  if (
-    !data ||
-    data.type !== "DALEELAK_SOCIAL_POST"
-  ) {
-    return;
-  }
-
-  const incomingSource: Source =
-    data.source === "treasury" ||
-    data.source === "deposits"
-      ? data.source
-      : "certificates";
-
-  const incomingCaption =
-    typeof data.caption === "string"
-      ? data.caption
-      : "";
-
-  const incomingImage =
-    typeof data.image === "string"
-      ? data.image
-      : "";
-
-  setSource(incomingSource);
-  setCaption(incomingCaption);
-  setSection("Content");
-
-  if (!incomingImage) {
-    return;
-  }
-
-  setUploading(true);
-
-  try {
-    const uploadResponse = await fetch(
-      "/api/upload",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          media: incomingImage,
-        }),
-      }
-    );
-
-    const uploadData =
-      await uploadResponse.json();
+  const onMessage = async (
+    event: MessageEvent
+  ) => {
+    const data = event.data;
 
     if (
-      !uploadResponse.ok ||
-      !uploadData.success ||
-      !uploadData.url
+      !data ||
+      data.type !== "DALEELAK_SOCIAL_POST"
     ) {
-      throw new Error(
-        uploadData.error ||
-          "فشل رفع الصورة"
-      );
+      return;
     }
 
-    setMedia(uploadData.url);
-    setMediaType("image");
-  } catch (error) {
-    console.error(
-      "Image upload failed:",
-      error
-    );
+    const incomingSource: Source =
+      data.source === "treasury" ||
+      data.source === "deposits"
+        ? data.source
+        : "certificates";
 
-    alert(
-      error instanceof Error
-        ? error.message
-        : "فشل رفع الصورة"
+    const incomingCaption =
+      typeof data.caption === "string"
+        ? data.caption
+        : "";
+
+      const incomingImage =
+        typeof data.image === "string"
+          ? data.image
+          : "";
+          
+    console.log("DALEELAK data.image:", data.image);
+    console.log("DALEELAK incomingImage:", incomingImage);
+    setSource(incomingSource);
+    setCaption(incomingCaption);
+    setSection("Content");
+
+    if (!incomingImage) {
+      return;
+    }
+
+setUploading(true);
+
+try {
+  const uploadResponse =
+    await fetch("/api/upload", {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify({
+        media: incomingImage,
+      }),
+    });
+
+  const uploadData =
+    await uploadResponse.json();
+
+  if (
+    !uploadResponse.ok ||
+    !uploadData.success ||
+    !uploadData.fileId
+  ) {
+    throw new Error(
+      uploadData.error ||
+        "فشل رفع صورة Generator إلى Google Drive"
     );
-  } finally {
-    setUploading(false);
   }
+
+  const mediaUrl =
+    new URL(
+      `/api/media/${encodeURIComponent(
+        uploadData.fileId
+      )}`,
+      window.location.origin
+    ).toString();
+
+  console.log(
+    "=== GENERATOR GOOGLE DRIVE UPLOAD SUCCESS ==="
+  );
+
+  console.log({
+    fileId:
+      uploadData.fileId,
+    mediaUrl,
+    name:
+      uploadData.name,
+    mimeType:
+      uploadData.mimeType,
+  });
+
+  setMedia(mediaUrl);
+  setMediaType("image");
+
+} catch (error) {
+  console.error(
+    "Image upload failed:",
+    error
+  );
+
+  alert(
+    error instanceof Error
+      ? error.message
+      : "فشل رفع الصورة"
+  );
+} finally {
+  setUploading(false);
+}
 };
+    
 
-window.addEventListener(
-  "message",
-  onMessage
-);
-
-return () => {
-  window.removeEventListener(
+  window.addEventListener(
     "message",
     onMessage
   );
-};
 
+  return () => {
+    window.removeEventListener(
+      "message",
+      onMessage
+    );
+  };
 }, []);
 
 const stats = useMemo(
