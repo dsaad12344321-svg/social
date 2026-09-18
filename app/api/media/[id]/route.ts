@@ -8,7 +8,112 @@ type RouteContext = {
   }>;
 };
 
+type ParsedRange =
+  | {
+      header: string;
+      start: number;
+      end: number;
+    }
+  | {
+      invalid: true;
+    };
+
 export const runtime = "nodejs";
+
+export async function HEAD(
+  request: Request,
+  context: RouteContext
+): Promise<Response> {
+  try {
+    const { id } = await context.params;
+    const fileId = decodeURIComponent(id);
+
+    if (!fileId) {
+      return new Response("Missing file ID.", { status: 400 });
+    }
+
+    const drive = getDriveClient();
+
+    const metadataResponse = await drive.files.get({
+      fileId,
+      fields: "id,name,mimeType,size",
+      supportsAllDrives: true,
+    });
+
+    const metadata = metadataResponse.data;
+
+    if (!metadata.id) {
+      return new Response("File not found.", { status: 404 });
+    }
+
+    const mimeType =
+      metadata.mimeType || "application/octet-stream";
+    const totalSize = getFileSize(metadata.size);
+
+    const responseHeaders = createBaseHeaders(
+      mimeType,
+      metadata.name
+    );
+
+    if (totalSize !== undefined) {
+      responseHeaders.set(
+        "Content-Length",
+        String(totalSize)
+      );
+    }
+
+    const range = request.headers.get("range");
+
+    if (range && totalSize !== undefined) {
+      const parsedRange = parseRange(range, totalSize);
+
+      if ("invalid" in parsedRange) {
+        responseHeaders.set(
+          "Content-Range",
+          `bytes */${totalSize}`
+        );
+
+        return new Response(null, {
+          status: 416,
+          headers: responseHeaders,
+        });
+      }
+
+      responseHeaders.set(
+        "Content-Range",
+        `bytes ${parsedRange.start}-${parsedRange.end}/${totalSize}`
+      );
+      responseHeaders.set(
+        "Content-Length",
+        String(parsedRange.end - parsedRange.start + 1)
+      );
+
+      return new Response(null, {
+        status: 206,
+        headers: responseHeaders,
+      });
+    }
+
+    return new Response(null, {
+      status: 200,
+      headers: responseHeaders,
+    });
+  } catch (error: unknown) {
+    console.error("Google Drive media HEAD error:", error);
+
+    return new Response(
+      error instanceof Error
+        ? error.message
+        : "Failed to load media metadata.",
+      {
+        status: getErrorStatus(error),
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+      }
+    );
+  }
+}
 
 export async function GET(
   request: Request,
@@ -16,149 +121,114 @@ export async function GET(
 ): Promise<Response> {
   try {
     const { id } = await context.params;
-
-    const fileId =
-      decodeURIComponent(id);
+    const fileId = decodeURIComponent(id);
 
     if (!fileId) {
-      return new Response(
-        "Missing file ID.",
-        { status: 400 }
-      );
+      return new Response("Missing file ID.", { status: 400 });
     }
 
-    const drive =
-      getDriveClient();
+    const drive = getDriveClient();
 
-    /*
-     * First retrieve metadata so we know:
-     *
-     * - MIME type
-     * - filename
-     * - file size
-     */
-    const metadataResponse =
-      await drive.files.get({
-        fileId,
-        fields:
-          "id,name,mimeType,size",
-        supportsAllDrives: true,
-      });
+    const metadataResponse = await drive.files.get({
+      fileId,
+      fields: "id,name,mimeType,size",
+      supportsAllDrives: true,
+    });
 
-    const metadata =
-      metadataResponse.data;
+    const metadata = metadataResponse.data;
 
     if (!metadata.id) {
-      return new Response(
-        "File not found.",
-        { status: 404 }
-      );
+      return new Response("File not found.", { status: 404 });
     }
 
     const mimeType =
-      metadata.mimeType ||
-      "application/octet-stream";
+      metadata.mimeType || "application/octet-stream";
+    const totalSize = getFileSize(metadata.size);
+    const requestedRange = request.headers.get("range");
 
-    /*
-     * Forward HTTP Range headers.
-     *
-     * This is important for videos because browsers,
-     * Buffer and other consumers may request only a
-     * portion of the file.
-     */
-    const range =
-      normalizeRange(
-        request.headers.get("range"),
-        metadata.size
+    let rangeHeader: string | undefined;
+
+    if (requestedRange && totalSize !== undefined) {
+      const parsedRange = parseRange(
+        requestedRange,
+        totalSize
       );
 
-    const driveResponse =
-      await drive.files.get(
-        {
-          fileId,
-          alt: "media",
-          supportsAllDrives: true,
-        },
-        {
-          responseType: "stream",
-
-          ...(range
-            ? {
-                headers: {
-                  Range: range,
-                },
-              }
-            : {}),
-        }
-      );
-
-    const nodeStream =
-      driveResponse.data;
-
-    const webStream =
-      Readable.toWeb(
-        nodeStream
-      ) as ReadableStream;
-
-    const responseHeaders =
-      new Headers();
-
-    responseHeaders.set(
-      "Content-Type",
-      mimeType
-    );
-
-    responseHeaders.set(
-      "Cache-Control",
-      "public, max-age=31536000, immutable"
-    );
-
-    responseHeaders.set(
-      "Accept-Ranges",
-      "bytes"
-    );
-
-    if (metadata.name) {
-      const filename = sanitizeFilename(
-        metadata.name
-      );
-
-      const encodedFilename =
-        encodeRFC5987ValueChars(
+      if ("invalid" in parsedRange) {
+        const responseHeaders = createBaseHeaders(
+          mimeType,
           metadata.name
         );
 
-      responseHeaders.set(
-        "Content-Disposition",
-        `inline; filename="${filename}"; filename*=UTF-8''${encodedFilename}`
-      );
+        responseHeaders.set(
+          "Content-Range",
+          `bytes */${totalSize}`
+        );
+
+        return new Response(null, {
+          status: 416,
+          headers: responseHeaders,
+        });
+      }
+
+      rangeHeader = parsedRange.header;
+    } else if (requestedRange) {
+      rangeHeader = requestedRange;
     }
 
-    /*
-     * Google may return the HTTP status and headers
-     * through the underlying response.
-     */
-    const status =
-      getStreamStatus(
-        driveResponse
-      );
+    const driveResponse = await drive.files.get(
+      {
+        fileId,
+        alt: "media",
+        supportsAllDrives: true,
+      },
+      {
+        responseType: "stream",
 
-    const contentLength =
-      getHeader(
-        driveResponse,
-        "content-length"
-      );
+        ...(rangeHeader
+          ? {
+              headers: {
+                Range: rangeHeader,
+              },
+            }
+          : {}),
+      }
+    );
 
-    const contentRange =
-      getHeader(
-        driveResponse,
-        "content-range"
-      );
+    const nodeStream = driveResponse.data;
+    const webStream = Readable.toWeb(
+      nodeStream
+    ) as ReadableStream;
+
+    const responseHeaders = createBaseHeaders(
+      mimeType,
+      metadata.name
+    );
+
+    const status = getStreamStatus(driveResponse);
+
+    const contentLength = getHeader(
+      driveResponse,
+      "content-length"
+    );
+
+    const contentRange = getHeader(
+      driveResponse,
+      "content-range"
+    );
 
     if (contentLength) {
       responseHeaders.set(
         "Content-Length",
         contentLength
+      );
+    } else if (
+      totalSize !== undefined &&
+      status === 200
+    ) {
+      responseHeaders.set(
+        "Content-Length",
+        String(totalSize)
       );
     }
 
@@ -169,29 +239,22 @@ export async function GET(
       );
     }
 
-    return new Response(
-      webStream,
-      {
-        status,
-        headers:
-          responseHeaders,
-      }
-    );
+    return new Response(webStream, {
+      status,
+      headers: responseHeaders,
+    });
   } catch (error: unknown) {
     console.error(
       "Google Drive media error:",
       error
     );
 
-    const status =
-      getErrorStatus(error);
-
     return new Response(
       error instanceof Error
         ? error.message
         : "Failed to load media.",
       {
-        status,
+        status: getErrorStatus(error),
         headers: {
           "Content-Type":
             "text/plain; charset=utf-8",
@@ -201,71 +264,167 @@ export async function GET(
   }
 }
 
-function normalizeRange(
-  range: string | null,
-  size: string | null | undefined
-): string | undefined {
-  if (!range || !size) {
-    return range || undefined;
+function parseRange(
+  range: string,
+  totalSize: number
+): ParsedRange {
+  const trimmed = range.trim();
+
+  if (!/^bytes=/i.test(trimmed)) {
+    return { invalid: true };
   }
 
-  const totalSize = Number(size);
+  const value = trimmed.slice(6);
 
-  if (!Number.isFinite(totalSize) || totalSize <= 0) {
-    return undefined;
+  // This media endpoint intentionally supports one range only.
+  if (value.includes(",")) {
+    return { invalid: true };
   }
 
-  const match =
-    /^bytes=(\\d+)-(\\d*)$/.exec(
-      range.trim()
-    );
+  const match = /^(\d*)-(\d*)$/.exec(value);
 
   if (!match) {
-    return undefined;
+    return { invalid: true };
   }
 
-  const start = Number(match[1]);
-  const end = match[2]
-    ? Number(match[2])
-    : totalSize - 1;
+  const startText = match[1];
+  const endText = match[2];
+
+  // Suffix range: bytes=-500
+  if (!startText) {
+    if (!endText) {
+      return { invalid: true };
+    }
+
+    const suffixLength = Number(endText);
+
+    if (
+      !Number.isSafeInteger(suffixLength) ||
+      suffixLength <= 0
+    ) {
+      return { invalid: true };
+    }
+
+    const start = Math.max(
+      totalSize - suffixLength,
+      0
+    );
+    const end = totalSize - 1;
+
+    return {
+      header: `bytes=${start}-${end}`,
+      start,
+      end,
+    };
+  }
+
+  const start = Number(startText);
 
   if (
     !Number.isSafeInteger(start) ||
-    !Number.isSafeInteger(end) ||
     start < 0 ||
-    start >= totalSize ||
+    start >= totalSize
+  ) {
+    return { invalid: true };
+  }
+
+  let end = endText
+    ? Number(endText)
+    : totalSize - 1;
+
+  if (
+    !Number.isSafeInteger(end) ||
     end < start
+  ) {
+    return { invalid: true };
+  }
+
+  end = Math.min(
+    end,
+    totalSize - 1
+  );
+
+  return {
+    header: `bytes=${start}-${end}`,
+    start,
+    end,
+  };
+}
+
+function getFileSize(
+  size: string | null | undefined
+): number | undefined {
+  if (!size) {
+    return undefined;
+  }
+
+  const value = Number(size);
+
+  if (
+    !Number.isSafeInteger(value) ||
+    value <= 0
   ) {
     return undefined;
   }
 
-  return `bytes=${start}-${Math.min(
-    end,
-    totalSize - 1
-  )}`;
+  return value;
+}
+
+function createBaseHeaders(
+  mimeType: string,
+  filename?: string | null
+): Headers {
+  const headers = new Headers();
+
+  headers.set(
+    "Content-Type",
+    mimeType
+  );
+
+  headers.set(
+    "Cache-Control",
+    "public, max-age=31536000, immutable"
+  );
+
+  headers.set(
+    "Accept-Ranges",
+    "bytes"
+  );
+
+  if (filename) {
+    const safeFilename =
+      sanitizeFilename(filename);
+
+    const encodedFilename =
+      encodeRFC5987ValueChars(filename);
+
+    headers.set(
+      "Content-Disposition",
+      `inline; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`
+    );
+  }
+
+  return headers;
 }
 
 function getHeader(
   response: unknown,
   name: string
 ): string | undefined {
-  const data =
-    response as {
-      headers?: Record<
-        string,
-        unknown
-      >;
-    };
+  const data = response as {
+    headers?: Record<
+      string,
+      unknown
+    >;
+  };
 
-  const headers =
-    data?.headers;
+  const headers = data?.headers;
 
   if (!headers) {
     return undefined;
   }
 
-  const target =
-    name.toLowerCase();
+  const target = name.toLowerCase();
 
   for (const [
     key,
@@ -295,10 +454,9 @@ function getHeader(
 function getStreamStatus(
   response: unknown
 ) {
-  const value =
-    response as {
-      status?: number;
-    };
+  const value = response as {
+    status?: number;
+  };
 
   if (
     typeof value.status ===
@@ -313,13 +471,12 @@ function getStreamStatus(
 function getErrorStatus(
   error: unknown
 ) {
-  const value =
-    error as {
-      code?: number;
-      response?: {
-        status?: number;
-      };
+  const value = error as {
+    code?: number;
+    response?: {
+      status?: number;
     };
+  };
 
   if (
     typeof value?.response?.status ===
