@@ -1619,10 +1619,11 @@ return (
           </div>
 
           <div className="media-library-tools">
+            <span className="media-view-label">حجم العرض</span>
             <div className="media-view-switcher" aria-label="حجم العرض">
-              <button className={mediaView === "small" ? "active" : ""} onClick={() => setMediaView("small")}>Small</button>
-              <button className={mediaView === "medium" ? "active" : ""} onClick={() => setMediaView("medium")}>Medium</button>
-              <button className={mediaView === "large" ? "active" : ""} onClick={() => setMediaView("large")}>Large</button>
+              <button type="button" className={mediaView === "small" ? "active" : ""} onClick={() => setMediaView("small")} aria-pressed={mediaView === "small"}>صغير</button>
+              <button type="button" className={mediaView === "medium" ? "active" : ""} onClick={() => setMediaView("medium")} aria-pressed={mediaView === "medium"}>متوسط</button>
+              <button type="button" className={mediaView === "large" ? "active" : ""} onClick={() => setMediaView("large")} aria-pressed={mediaView === "large"}>كبير</button>
             </div>
             <button
               className="library-refresh"
@@ -1648,10 +1649,7 @@ return (
                   ) : (
                     <img src={item.url} alt={item.name} loading="lazy" />
                   )}
-                  <span className="media-type-badge">
-                    {item.mediaType === "video" ? "فيديو" : "صورة"}
-                  </span>
-                  {item.pinned && <span className="media-pin-badge">📌 مثبت</span>}
+                  {item.pinned && <span className="media-pin-badge" aria-label="مثبت">📌</span>}
                 </div>
                 <div className="media-card-body">
                   <strong title={item.name}>{item.name}</strong>
@@ -1666,7 +1664,7 @@ return (
                       onClick={() => toggleMediaPin(item)}
                       disabled={mediaActionId === item.id}
                     >
-                      {item.pinned ? "إلغاء التثبيت" : "Pin"}
+                      {item.pinned ? "إلغاء التثبيت" : "تثبيت"}
                     </button>
                     <button
                       className="delete-media-button"
