@@ -941,6 +941,31 @@ setMediaType("image");
 
 }
 
+async function getVideoDuration(videoUrl: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      const duration = video.duration;
+      video.removeAttribute("src");
+      video.load();
+
+      if (!Number.isFinite(duration) || duration < 0) {
+        reject(new Error("تعذر معرفة مدة الفيديو"));
+        return;
+      }
+
+      resolve(duration);
+    };
+    video.onerror = () => {
+      video.removeAttribute("src");
+      video.load();
+      reject(new Error("تعذر قراءة مدة الفيديو"));
+    };
+    video.src = videoUrl;
+  });
+}
+
 async function publishPost(
 post: Post
 ) {
@@ -981,6 +1006,13 @@ if (
 setPublishingId(post.id);
 
 try {
+  let videoDuration: number | undefined;
+
+  if (post.mediaType === "video") {
+    videoDuration = await getVideoDuration(post.media);
+    console.log("=== VIDEO DURATION ===", videoDuration);
+  }
+
   const response = await fetch(
     "/api/buffer/publish",
     {
@@ -998,6 +1030,8 @@ try {
           post.mediaType === "video"
             ? post.media
             : undefined,
+
+        videoDuration,
 
         caption: post.caption,
 
