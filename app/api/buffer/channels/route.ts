@@ -5,6 +5,19 @@ type BufferOrganization = {
   ownerEmail?: string;
 };
 
+type BufferRateLimit = {
+  windowSeconds: number;
+  quota: number;
+  remaining: number;
+  resetSeconds: number;
+};
+
+type BufferRateLimits = {
+  fifteenMinutes?: BufferRateLimit;
+  oneDay?: BufferRateLimit;
+  thirtyDays?: BufferRateLimit;
+};
+
 type BufferChannel = {
   id: string;
   name: string;
@@ -18,11 +31,57 @@ type BufferChannel = {
 
 const BUFFER_API_URL = "https://api.buffer.com";
 
+function parseRateLimits(headers: Headers): BufferRateLimits {
+  const raw = headers.get("ratelimit") || "";
+  const entries = raw.split(/,\s*(?=")/);
+
+  const result: BufferRateLimits = {};
+
+  for (const entry of entries) {
+    const windowMatch = entry.match(/"[^"]+"[^;]*;\s*r=(\d+);\s*t=(\d+)/);
+    if (!windowMatch) continue;
+
+    const quotaMatch = entry.match(/^"([^"]+)"/);
+    const name = quotaMatch?.[1] || "";
+    const remaining = Number(windowMatch[1]);
+    const resetSeconds = Number(windowMatch[2]);
+
+    let target: keyof BufferRateLimits | null = null;
+    if (name.includes("15min")) target = "fifteenMinutes";
+    else if (name.includes("1day")) target = "oneDay";
+    else if (name.includes("30days")) target = "thirtyDays";
+    if (!target) continue;
+
+    const quotaMatchFromName = name.match(/^(\d+)-in-/);
+    const quota = quotaMatchFromName ? Number(quotaMatchFromName[1]) : 0;
+
+    result[target] = {
+      windowSeconds:
+        target === "fifteenMinutes"
+          ? 900
+          : target === "oneDay"
+          ? 86400
+          : 2592000,
+      quota,
+      remaining,
+      resetSeconds,
+    };
+  }
+
+  return {
+    ...result,
+    accountName: accountData?.name || null,
+    accountEmail: accountData?.email || null,
+    accountAvatar: accountData?.avatar || null,
+    rateLimits,
+  };
+}
+
 async function bufferRequest(
   apiKey: string,
   query: string,
   variables?: Record<string, unknown>
-) {
+): Promise<{ data: any; rateLimits: BufferRateLimits }> {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
 
@@ -67,7 +126,10 @@ async function bufferRequest(
     );
   }
 
-  return data?.data;
+  return {
+    data: data?.data,
+    rateLimits: parseRateLimits(response.headers),
+  };
 }
 
 async function getBufferAccount(
@@ -129,7 +191,7 @@ async function getBufferAccount(
       }`
     
 
-    const channelsData =
+    const channelsResult =
       await bufferRequest(
         apiKey,
         channelsQuery,
@@ -138,6 +200,8 @@ async function getBufferAccount(
             organization.id,
         }
       );
+
+    rateLimits = channelsResult.rateLimits;
 
     result.organizations.push({
       id: organization.id,
