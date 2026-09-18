@@ -1,4 +1,3 @@
-
 type BufferOrganization = {
   id: string;
   name: string;
@@ -35,31 +34,42 @@ function parseRateLimits(headers: Headers): BufferRateLimits {
   const raw = headers.get("ratelimit") || "";
   const result: BufferRateLimits = {};
 
-  const matches = raw.match(/"([^"]+)"[^;]*;\\s*r=(\\d+);\\s*t=(\\d+)/g) || [];
+  const entries = raw.split(",").map((entry) => entry.trim()).filter(Boolean);
 
-  for (const entry of matches) {
-    const nameMatch = entry.match(/^"([^"]+)"/);
-    const valuesMatch = entry.match(/r=(\\d+);\\s*t=(\\d+)/);
-    if (!nameMatch || !valuesMatch) continue;
+  for (const entry of entries) {
+    const nameMatch = entry.match(/"([^"]+)"/);
+    const remainingMatch = entry.match(/(?:^|[;\s])r=(\d+)/);
+    const resetMatch = entry.match(/(?:^|[;\s])t=(\d+)/);
+
+    if (!nameMatch || !remainingMatch || !resetMatch) {
+      continue;
+    }
 
     const name = nameMatch[1];
-    const remaining = Number(valuesMatch[1]);
-    const resetSeconds = Number(valuesMatch[2]);
+    const remaining = Number(remainingMatch[1]);
+    const resetSeconds = Number(resetMatch[1]);
 
     let target: keyof BufferRateLimits | null = null;
-    if (name.includes("15min")) target = "fifteenMinutes";
-    else if (name.includes("1day")) target = "oneDay";
-    else if (name.includes("30days")) target = "thirtyDays";
-    if (!target) continue;
+    let windowSeconds = 0;
 
-    const quotaMatch = name.match(/^(\\d+)-in-/);
+    if (name.includes("15min")) {
+      target = "fifteenMinutes";
+      windowSeconds = 900;
+    } else if (name.includes("1day")) {
+      target = "oneDay";
+      windowSeconds = 86400;
+    } else if (name.includes("30days")) {
+      target = "thirtyDays";
+      windowSeconds = 2592000;
+    }
+
+    if (!target) {
+      continue;
+    }
+
+    const quotaMatch = name.match(/^(\d+)-in-/);
     result[target] = {
-      windowSeconds:
-        target === "fifteenMinutes"
-          ? 900
-          : target === "oneDay"
-          ? 86400
-          : 2592000,
+      windowSeconds,
       quota: quotaMatch ? Number(quotaMatch[1]) : 0,
       remaining,
       resetSeconds,
@@ -76,17 +86,14 @@ async function bufferRequest(
 ): Promise<{ data: any; rateLimits: BufferRateLimits }> {
   const response = await fetch(BUFFER_API_URL, {
     method: "POST",
-
     headers: {
       "Content-Type": "application/json",
       Authorization: "Bearer " + apiKey,
     },
-
     body: JSON.stringify({
       query,
       variables,
     }),
-
     cache: "no-store",
   });
 
@@ -104,10 +111,7 @@ async function bufferRequest(
     );
   }
 
-  if (
-    Array.isArray(data?.errors) &&
-    data.errors.length
-  ) {
+  if (Array.isArray(data?.errors) && data.errors.length) {
     throw new Error(
       data.errors
         .map(
@@ -128,23 +132,24 @@ async function getBufferAccount(
   apiKey: string,
   accountNumber: number
 ) {
-  const organizationsQuery =
-    `query GetOrganizations {
-      account {
+  const organizationsQuery = `query GetOrganizations {
+    account {
+      id
+      name
+      email
+      avatar
+      organizations {
         id
         name
-        email
-        avatar
-        organizations {
-          id
-          name
-          ownerEmail
-        }
+        ownerEmail
       }
-    }`;
+    }
+  }`;
 
-  const organizationsResult =
-    await bufferRequest(apiKey, organizationsQuery);
+  const organizationsResult = await bufferRequest(
+    apiKey,
+    organizationsQuery
+  );
 
   const accountData = organizationsResult.data?.account;
   const organizations = accountData?.organizations || [];
@@ -152,6 +157,10 @@ async function getBufferAccount(
 
   const result = {
     account: accountNumber,
+    accountName: accountData?.name || null,
+    accountEmail: accountData?.email || null,
+    accountAvatar: accountData?.avatar || null,
+    rateLimits,
     organizations: [] as Array<{
       id: string;
       name: string;
@@ -160,51 +169,49 @@ async function getBufferAccount(
     }>,
   };
 
-  for (
-    const organization of organizations as BufferOrganization[]
-  ) {
-    const channelsQuery = 
-      `query GetChannels(
-        $organizationId: OrganizationId!
+  for (const organization of organizations as BufferOrganization[]) {
+    const channelsQuery = `query GetChannels(
+      $organizationId: OrganizationId!
+    ) {
+      channels(
+        input: {
+          organizationId: $organizationId
+        }
       ) {
-        channels(
-          input: {
-            organizationId: $organizationId
-          }
-        ) {
-          id
-          name
-          displayName
-          service
-          avatar
-          isQueuePaused
-          isDisconnected
-          isLocked
-        }
-      }`
-    
+        id
+        name
+        displayName
+        service
+        avatar
+        isQueuePaused
+        isDisconnected
+        isLocked
+      }
+    }`;
 
-    const channelsResult =
-      await bufferRequest(
-        apiKey,
-        channelsQuery,
-        {
-          organizationId:
-            organization.id,
-        }
-      );
+    const channelsResult = await bufferRequest(
+      apiKey,
+      channelsQuery,
+      {
+        organizationId: organization.id,
+      }
+    );
 
-    rateLimits = channelsResult.rateLimits;
+    if (
+      Object.keys(channelsResult.rateLimits).length > 0
+    ) {
+      rateLimits = channelsResult.rateLimits;
+    }
 
     result.organizations.push({
       id: organization.id,
       name: organization.name,
-      ownerEmail:
-        organization.ownerEmail,
-      channels:
-        channelsResult.data?.channels || [],
+      ownerEmail: organization.ownerEmail,
+      channels: channelsResult.data?.channels || [],
     });
   }
+
+  result.rateLimits = rateLimits;
 
   return result;
 }
@@ -234,8 +241,7 @@ export async function GET() {
       return Response.json(
         {
           success: false,
-          error:
-            "No Buffer API keys are configured",
+          error: "No Buffer API keys are configured",
         },
         { status: 500 }
       );
@@ -249,11 +255,10 @@ export async function GET() {
 
     for (const item of configuredKeys) {
       try {
-        const account =
-          await getBufferAccount(
-            item.key,
-            item.account
-          );
+        const account = await getBufferAccount(
+          item.key,
+          item.account
+        );
 
         accounts.push(account);
 
@@ -279,46 +284,23 @@ export async function GET() {
       }
     }
 
-    const channels =
-      accounts.flatMap(
-        (account) =>
-          account.organizations.flatMap(
-            (organization) =>
-              organization.channels.map(
-                (channel) => ({
-                  ...channel,
+    const channels = accounts.flatMap((account) =>
+      account.organizations.flatMap((organization) =>
+        organization.channels.map((channel) => ({
+          ...channel,
+          account: account.account,
+          organizationId: organization.id,
+          organizationName: organization.name,
+          ownerEmail: organization.ownerEmail,
+        }))
+      )
+    );
 
-                  account:
-                    account.account,
-
-                  organizationId:
-                    organization.id,
-
-                  organizationName:
-                    organization.name,
-
-                  ownerEmail:
-                    organization.ownerEmail,
-                })
-              )
-          )
-      );
-
-    /*
-     * Important:
-     * If any configured Buffer account failed,
-     * do not silently pretend everything is OK.
-     *
-     * This makes problems with account 2
-     * (for example the Instagram account)
-     * visible immediately.
-     */
     if (errors.length > 0) {
       return Response.json(
         {
           success: false,
-          error:
-            "فشل تحميل أحد حسابات Buffer",
+          error: "فشل تحميل أحد حسابات Buffer",
           accounts,
           channels,
           errors,
@@ -334,10 +316,7 @@ export async function GET() {
       errors: [],
     });
   } catch (error) {
-    console.error(
-      "Buffer channels error:",
-      error
-    );
+    console.error("Buffer channels error:", error);
 
     return Response.json(
       {
@@ -351,4 +330,3 @@ export async function GET() {
     );
   }
 }
-
