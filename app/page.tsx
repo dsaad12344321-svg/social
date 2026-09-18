@@ -41,6 +41,16 @@ type Status = "draft" | "scheduled" | "published" | "failed";
 
 type MediaType = "image" | "video";
 
+type DriveMedia = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size?: string | null;
+  createdTime?: string | null;
+  url: string;
+  mediaType: MediaType;
+};
+
 type Post = {
 id: string;
 source: Source;
@@ -141,6 +151,9 @@ const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>(
 );
 
 const [loadingChannels, setLoadingChannels] = useState(false);
+
+const [mediaLibrary, setMediaLibrary] = useState<DriveMedia[]>([]);
+const [loadingMediaLibrary, setLoadingMediaLibrary] = useState(false);
 
 async function handleMediaUpload(
   event: React.ChangeEvent<HTMLInputElement>
@@ -495,6 +508,36 @@ channel.service
   .map((channel) => channel.id);
 
 }
+
+useEffect(() => {
+  if (section !== "Content") {
+    return;
+  }
+
+  async function loadMediaLibrary() {
+    setLoadingMediaLibrary(true);
+
+    try {
+      const response = await fetch("/api/media-library", {
+        cache: "no-store",
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data?.error || "فشل تحميل مكتبة الوسائط");
+      }
+
+      setMediaLibrary(Array.isArray(data.files) ? data.files : []);
+    } catch (error) {
+      console.error("Media library error:", error);
+      setMediaLibrary([]);
+    } finally {
+      setLoadingMediaLibrary(false);
+    }
+  }
+
+  loadMediaLibrary();
+}, [section]);
 
 useEffect(() => {
 async function loadBufferChannels() {
@@ -1011,6 +1054,16 @@ try {
 
 }
 
+function useLibraryMedia(item: DriveMedia) {
+  setMedia(item.url);
+  setMediaType(item.mediaType);
+  setSection("Dashboard");
+
+  if (item.mediaType !== "video" && platforms.includes("YouTube")) {
+    setPlatforms(platforms.filter((platform) => platform !== "YouTube"));
+  }
+}
+
 function removePost(id: string) {
 setPosts((current) =>
 current.filter(
@@ -1070,7 +1123,8 @@ return (
       </p>
     </header>
 
-    <section className="stats">
+    {section === "Dashboard" && (
+      <section className="stats">
       <Stat
         label="Drafts"
         value={stats.drafts}
@@ -1090,9 +1144,11 @@ return (
         label="Failed"
         value={stats.failed}
       />
-    </section>
+      </section>
+    )}
 
-    <section className="grid">
+    {section === "Dashboard" && (
+      <section className="grid">
       <div className="card queue">
         <h2>
           محتوى قيد النشر
@@ -1415,9 +1471,10 @@ return (
           حفظ كمسودة
         </button>
       </div>
-    </section>
+      </section>
+    )}
 
-    {posts.length > 0 && (
+    {section === "Dashboard" && posts.length > 0 && (
       <section className="card all">
         <h2>
           كل المحتوى
@@ -1504,10 +1561,70 @@ return (
         ))}
       </section>
     )}
+
+    {section === "Content" && (
+      <section className="card media-library">
+        <div className="media-library-header">
+          <div>
+            <h2>مكتبة المحتوى</h2>
+            <p className="muted">كل الصور والفيديوهات الموجودة في Google Drive</p>
+          </div>
+          <button
+            className="library-refresh"
+            onClick={() => setSection("Content")}
+            disabled={loadingMediaLibrary}
+          >
+            {loadingMediaLibrary ? "جاري التحديث..." : "تحديث"}
+          </button>
+        </div>
+
+        {loadingMediaLibrary ? (
+          <div className="library-empty">جاري تحميل الملفات من Google Drive...</div>
+        ) : mediaLibrary.length === 0 ? (
+          <div className="library-empty">لا توجد صور أو فيديوهات في Google Drive.</div>
+        ) : (
+          <div className="media-library-grid">
+            {mediaLibrary.map((item) => (
+              <article className="media-card" key={item.id}>
+                <div className="media-card-preview">
+                  {item.mediaType === "video" ? (
+                    <video src={item.url} muted playsInline preload="metadata" />
+                  ) : (
+                    <img src={item.url} alt={item.name} loading="lazy" />
+                  )}
+                  <span className="media-type-badge">
+                    {item.mediaType === "video" ? "فيديو" : "صورة"}
+                  </span>
+                </div>
+                <div className="media-card-body">
+                  <strong title={item.name}>{item.name}</strong>
+                  <small>
+                    {item.createdTime ? new Date(item.createdTime).toLocaleDateString("ar-EG") : ""}
+                    {item.size ? " · " + formatMediaSize(item.size) : ""}
+                  </small>
+                  <button className="use-media-button" onClick={() => useLibraryMedia(item)}>
+                    استخدام هذا الملف
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    )}
   </main>
 </div>
 
 );
+}
+
+function formatMediaSize(size?: string | null) {
+  if (!size) return "";
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  return (bytes / 1024 / 1024 / 1024).toFixed(1) + " GB";
 }
 
 function Stat({
