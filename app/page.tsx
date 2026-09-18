@@ -307,9 +307,22 @@ try {
 
 let uploadedFile: any = null;
 
+/*
+ * Google Drive may need extra time to finalize/index
+ * large video files after the upload request completes.
+ *
+ * We keep checking through our same-origin Next.js API
+ * instead of asking the browser to read Google's
+ * cross-origin upload response.
+ *
+ * 30 attempts × 2 seconds = up to 60 seconds.
+ */
+const MAX_LOOKUP_ATTEMPTS = 30;
+const LOOKUP_DELAY_MS = 2000;
+
 for (
   let attempt = 0;
-  attempt < 6;
+  attempt < MAX_LOOKUP_ATTEMPTS;
   attempt++
 ) {
   try {
@@ -332,9 +345,10 @@ for (
       await lookupResponse.json();
 
     console.log(
-      `Google Drive lookup attempt ${
-        attempt + 1
-      }:`,
+      "Google Drive lookup attempt:",
+      attempt + 1,
+      "/",
+      MAX_LOOKUP_ATTEMPTS,
       lookupData
     );
 
@@ -356,9 +370,17 @@ for (
     );
   }
 
-  await new Promise((resolve) =>
-    setTimeout(resolve, 1000)
-  );
+  if (
+    attempt <
+    MAX_LOOKUP_ATTEMPTS - 1
+  ) {
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        LOOKUP_DELAY_MS
+      )
+    );
+  }
 }
 
 const fileId =
