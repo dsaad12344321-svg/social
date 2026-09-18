@@ -61,14 +61,14 @@ export async function POST(
   try {
     const body = await request.json();
     if (
-    body?.action === "find" &&
-    typeof body?.name === "string" &&
-    body.name.trim()
-  ) {
-    return await findUploadedFile(
-      body.name.trim()
-    );
-  }
+      body?.action === "find" &&
+      typeof body?.uploadId === "string" &&
+      body.uploadId.trim()
+    ) {
+      return await findUploadedFile(
+        body.uploadId.trim()
+      );
+    }
 
     /*
      * --------------------------------------------------
@@ -156,8 +156,10 @@ export async function POST(
     const folderId =
       getDriveFolderId();
 
+    const uploadId = crypto.randomUUID();
+
     const uploadName =
-      `${crypto.randomUUID()}-${name}`;
+      `${uploadId}-${name}`;
 
     const metadata: {
       name: string;
@@ -225,6 +227,7 @@ export async function POST(
     return Response.json({
       success: true,
       sessionUrl,
+      uploadId,
       name: uploadName,
       originalName: name,
       mimeType,
@@ -702,7 +705,7 @@ async function importRemoteMedia(
 }
 
 async function findUploadedFile(
-  name: string
+  uploadId: string
 ): Promise<Response> {
   try {
     const accessToken =
@@ -711,11 +714,11 @@ async function findUploadedFile(
     const folderId =
       getDriveFolderId();
 
-    const escapedName =
-      name.replace(/'/g, "\\'");
+    const escapedUploadId =
+      uploadId.replace(/'/g, "\\'");
 
     let query =
-      `name = '${escapedName}' and trashed = false`;
+      `name contains '${escapedUploadId}-' and trashed = false`;
 
     if (folderId) {
       query +=
