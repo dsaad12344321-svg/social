@@ -164,15 +164,16 @@ export async function GET(
     const totalSize = getFileSize(metadata.size);
     const requestedRange = request.headers.get("range");
 
+    let parsedRequestedRange: ParsedRange | undefined;
     let rangeHeader: string | undefined;
 
     if (requestedRange && totalSize !== undefined) {
-      const parsedRange = parseRange(
+      parsedRequestedRange = parseRange(
         requestedRange,
         totalSize
       );
 
-      if ("invalid" in parsedRange) {
+      if ("invalid" in parsedRequestedRange) {
         console.warn("MEDIA RANGE DEBUG", {
           method: "GET",
           fileId,
@@ -202,12 +203,12 @@ export async function GET(
         fileId,
         requestedRange,
         totalSize,
-        normalizedRange: parsedRange.header,
-        start: parsedRange.start,
-        end: parsedRange.end,
+        normalizedRange: parsedRequestedRange.header,
+        start: parsedRequestedRange.start,
+        end: parsedRequestedRange.end,
       });
 
-      rangeHeader = parsedRange.header;
+      rangeHeader = parsedRequestedRange.header;
     } else if (requestedRange) {
       console.log("MEDIA RANGE DEBUG", {
         method: "GET",
@@ -249,37 +250,50 @@ export async function GET(
       metadata.name
     );
 
-    const status = getStreamStatus(driveResponse);
+    const driveStatus = getStreamStatus(driveResponse);
 
-    const contentLength = getHeader(
+    const driveContentLength = getHeader(
       driveResponse,
       "content-length"
     );
 
-    const contentRange = getHeader(
+    const driveContentRange = getHeader(
       driveResponse,
       "content-range"
     );
 
-    console.log("MEDIA RANGE DEBUG DRIVE", {
-      method: "GET",
-      fileId,
-      requestedRange,
-      rangeHeader,
-      totalSize,
-      driveStatus: status,
-      driveContentLength: contentLength,
-      driveContentRange: contentRange,
-    });
+    let status = driveStatus;
 
-    if (contentLength) {
+    if (
+      parsedRequestedRange &&
+      !("invalid" in parsedRequestedRange)
+    ) {
+      const rangeLength =
+        parsedRequestedRange.end -
+        parsedRequestedRange.start +
+        1;
+
+      // Google Drive's SDK stream response may omit Content-Length and
+      // Content-Range even when it correctly returns HTTP 206. Build
+      // these headers from the range we requested so Buffer receives
+      // a complete and unambiguous partial-content response.
+      responseHeaders.set(
+        "Content-Range",
+        `bytes ${parsedRequestedRange.start}-${parsedRequestedRange.end}/${totalSize}`
+      );
       responseHeaders.set(
         "Content-Length",
-        contentLength
+        String(rangeLength)
+      );
+      status = 206;
+    } else if (driveContentLength) {
+      responseHeaders.set(
+        "Content-Length",
+        driveContentLength
       );
     } else if (
       totalSize !== undefined &&
-      status === 200
+      driveStatus === 200
     ) {
       responseHeaders.set(
         "Content-Length",
@@ -287,12 +301,31 @@ export async function GET(
       );
     }
 
-    if (contentRange) {
+    if (
+      !parsedRequestedRange &&
+      driveContentRange
+    ) {
       responseHeaders.set(
         "Content-Range",
-        contentRange
+        driveContentRange
       );
     }
+
+    console.log("MEDIA RANGE DEBUG DRIVE", {
+      method: "GET",
+      fileId,
+      requestedRange,
+      rangeHeader,
+      totalSize,
+      driveStatus,
+      finalStatus: status,
+      driveContentLength,
+      driveContentRange,
+      finalContentLength:
+        responseHeaders.get("Content-Length"),
+      finalContentRange:
+        responseHeaders.get("Content-Range"),
+    });
 
     return new Response(webStream, {
       status,
