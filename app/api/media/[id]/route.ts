@@ -68,6 +68,14 @@ export async function HEAD(
       const parsedRange = parseRange(range, totalSize);
 
       if ("invalid" in parsedRange) {
+        console.warn("MEDIA RANGE DEBUG", {
+          method: "HEAD",
+          fileId,
+          requestedRange: range,
+          totalSize,
+          reason: "invalid-range",
+        });
+
         responseHeaders.set(
           "Content-Range",
           `bytes */${totalSize}`
@@ -78,6 +86,16 @@ export async function HEAD(
           headers: responseHeaders,
         });
       }
+
+      console.log("MEDIA RANGE DEBUG", {
+        method: "HEAD",
+        fileId,
+        requestedRange: range,
+        totalSize,
+        normalizedRange: parsedRange.header,
+        start: parsedRange.start,
+        end: parsedRange.end,
+      });
 
       responseHeaders.set(
         "Content-Range",
@@ -155,6 +173,14 @@ export async function GET(
       );
 
       if ("invalid" in parsedRange) {
+        console.warn("MEDIA RANGE DEBUG", {
+          method: "GET",
+          fileId,
+          requestedRange,
+          totalSize,
+          reason: "invalid-range",
+        });
+
         const responseHeaders = createBaseHeaders(
           mimeType,
           metadata.name
@@ -171,8 +197,26 @@ export async function GET(
         });
       }
 
+      console.log("MEDIA RANGE DEBUG", {
+        method: "GET",
+        fileId,
+        requestedRange,
+        totalSize,
+        normalizedRange: parsedRange.header,
+        start: parsedRange.start,
+        end: parsedRange.end,
+      });
+
       rangeHeader = parsedRange.header;
     } else if (requestedRange) {
+      console.log("MEDIA RANGE DEBUG", {
+        method: "GET",
+        fileId,
+        requestedRange,
+        totalSize,
+        normalizedRange: "unmodified-no-size",
+      });
+
       rangeHeader = requestedRange;
     }
 
@@ -216,6 +260,17 @@ export async function GET(
       driveResponse,
       "content-range"
     );
+
+    console.log("MEDIA RANGE DEBUG DRIVE", {
+      method: "GET",
+      fileId,
+      requestedRange,
+      rangeHeader,
+      totalSize,
+      driveStatus: status,
+      driveContentLength: contentLength,
+      driveContentRange: contentRange,
+    });
 
     if (contentLength) {
       responseHeaders.set(
