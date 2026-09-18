@@ -251,6 +251,12 @@ async function handleMediaUpload(
     const sessionUrl =
       initData.sessionUrl;
 
+    if (!initData.uploadId) {
+      throw new Error(
+        "فشل إنشاء معرف رفع Google Drive"
+      );
+    }
+
     /*
      * --------------------------------------------------
      * STEP 2
@@ -337,7 +343,7 @@ for (
 
         body: JSON.stringify({
           action: "find",
-          name: initData.name,
+          uploadId: initData.uploadId,
         }),
       });
 
