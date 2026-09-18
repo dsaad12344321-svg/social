@@ -212,7 +212,8 @@ async function createVideoPost(
   channelId: string,
   caption: string,
   videoUrl: string,
-  service: string
+  service: string,
+  videoDuration?: number
 ) {
   const normalizedService = normalizeService(service);
 
@@ -230,7 +231,7 @@ async function createVideoPost(
         ? `
           metadata: {
             facebook: {
-              type: reel
+              type: ${typeof videoDuration === "number" && videoDuration <= 90 ? "reel" : "post"}
             }
           }
         `
@@ -525,6 +526,13 @@ export async function POST(request: Request) {
         ? body.videoUrl.trim()
         : "";
 
+    const videoDuration =
+      typeof body?.videoDuration === "number" &&
+      Number.isFinite(body.videoDuration) &&
+      body.videoDuration >= 0
+        ? body.videoDuration
+        : undefined;
+
     const bufferVideoUrl = getBufferVideoUrl(
       request,
       videoUrl
@@ -792,7 +800,8 @@ if (
     channel.id,
     caption,
     bufferVideoUrl,
-    channel.service
+    channel.service,
+    videoDuration
   );
 
   if (response.errors?.length) {
