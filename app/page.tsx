@@ -13,6 +13,31 @@ type Platform =
 | "X"
 | "YouTube";
 
+type BufferRateLimit = {
+windowSeconds: number;
+quota: number;
+remaining: number;
+resetSeconds: number;
+};
+
+type BufferAccount = {
+account: number;
+accountName?: string | null;
+accountEmail?: string | null;
+accountAvatar?: string | null;
+rateLimits?: {
+fifteenMinutes?: BufferRateLimit;
+oneDay?: BufferRateLimit;
+thirtyDays?: BufferRateLimit;
+};
+organizations: Array<{
+id: string;
+name: string;
+ownerEmail?: string;
+channels: BufferChannel[];
+}>;
+};
+
 type BufferChannel = {
 id: string;
 name: string;
@@ -30,6 +55,7 @@ ownerEmail?: string;
 
 type BufferChannelsResponse = {
 success: boolean;
+accounts: BufferAccount[];
 channels: BufferChannel[];
 errors?: Array<{
 account: number;
@@ -150,6 +176,8 @@ const [publishingId, setPublishingId] = useState<string | null>(null);
 const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>(
 []
 );
+
+const [bufferAccounts, setBufferAccounts] = useState<BufferAccount[]>([]);
 
 const [loadingChannels, setLoadingChannels] = useState(false);
 
@@ -567,7 +595,12 @@ setLoadingChannels(true);
       ? data.channels
       : [];
 
+    const accounts = Array.isArray(data.accounts)
+      ? data.accounts
+      : [];
+
     setBufferChannels(channels);
+    setBufferAccounts(accounts);
   } catch (error) {
     console.error(
       "Buffer channels error:",
@@ -1610,6 +1643,140 @@ return (
       </section>
     )}
 
+    {section === "Accounts" && (
+      <section className="card buffer-accounts">
+        <div className="buffer-accounts-header">
+          <div>
+            <h2>حسابات Buffer</h2>
+            <p className="muted">
+              حسابات Buffer المتصلة، الاستهلاك المتبقي للـ API، والقنوات المرتبطة بكل حساب
+            </p>
+          </div>
+        </div>
+
+        {loadingChannels ? (
+          <div className="library-empty">جاري تحميل حسابات Buffer والقنوات...</div>
+        ) : bufferAccounts.length === 0 ? (
+          <div className="library-empty">لا توجد حسابات Buffer متصلة.</div>
+        ) : (
+          <div className="buffer-account-list">
+            {bufferAccounts.map((account) => {
+              const limits = account.rateLimits || {};
+              const limitCards = [
+                ["15 دقيقة", limits.fifteenMinutes],
+                ["24 ساعة", limits.oneDay],
+                ["30 يوم", limits.thirtyDays],
+              ] as const;
+
+              return (
+                <article className="buffer-account-card" key={account.account}>
+                  <div className="buffer-account-top">
+                    <div className="buffer-account-identity">
+                      {account.accountAvatar ? (
+                        <img
+                          src={account.accountAvatar}
+                          alt=""
+                          className="buffer-account-avatar"
+                        />
+                      ) : (
+                        <div className="buffer-account-avatar fallback">
+                          B{account.account}
+                        </div>
+                      )}
+                      <div>
+                        <span className="buffer-account-number">Buffer Account {account.account}</span>
+                        <h3>{account.accountName || "حساب Buffer " + account.account}</h3>
+                        {account.accountEmail && <p>{account.accountEmail}</p>}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="buffer-rate-section">
+                    <div className="buffer-section-title">
+                      <strong>طلبات API المتبقية</strong>
+                      <span>هذه حدود استخدام الـ API وليست رصيدًا منفصلًا للنشر</span>
+                    </div>
+                    <div className="buffer-rate-grid">
+                      {limitCards.map(([label, limit]) => (
+                        <div className="buffer-rate-card" key={label}>
+                          <span>{label}</span>
+                          <strong>
+                            {limit ? limit.remaining.toLocaleString("ar-EG") : "—"}
+                            {limit?.quota ? " / " + limit.quota.toLocaleString("ar-EG") : ""}
+                          </strong>
+                          <small>
+                            {limit
+                              ? "إعادة التعيين خلال " + formatBufferReset(limit.resetSeconds)
+                              : "غير متاح"}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="buffer-channel-section">
+                    <div className="buffer-section-title">
+                      <strong>القنوات المتصلة بهذا الحساب</strong>
+                      <span>{account.organizations.reduce((total, organization) => total + organization.channels.length, 0)} قناة</span>
+                    </div>
+
+                    {account.organizations.length === 0 ? (
+                      <div className="buffer-no-channels">لا توجد مؤسسات أو قنوات متصلة.</div>
+                    ) : (
+                      <div className="buffer-organizations">
+                        {account.organizations.map((organization) => (
+                          <div className="buffer-organization" key={organization.id}>
+                            <div className="buffer-organization-title">
+                              <strong>{organization.name}</strong>
+                              {organization.ownerEmail && <small>{organization.ownerEmail}</small>}
+                            </div>
+
+                            {organization.channels.length === 0 ? (
+                              <span className="buffer-no-channels">لا توجد قنوات في هذه المؤسسة.</span>
+                            ) : (
+                              <div className="buffer-channel-list">
+                                {organization.channels.map((channel) => (
+                                  <div className="buffer-channel-item" key={channel.id}>
+                                    {channel.avatar ? (
+                                      <img src={channel.avatar} alt="" />
+                                    ) : (
+                                      <div className="buffer-channel-avatar-fallback">
+                                        {(channel.displayName || channel.name || channel.service).slice(0, 1).toUpperCase()}
+                                      </div>
+                                    )}
+                                    <div className="buffer-channel-info">
+                                      <strong>{channel.displayName || channel.name}</strong>
+                                      <span>{channel.service}</span>
+                                    </div>
+                                    <span className={
+                                      "buffer-channel-status" +
+                                      (channel.isDisconnected || channel.isLocked ? " problem" : "")
+                                    }>
+                                      {channel.isDisconnected
+                                        ? "غير متصل"
+                                        : channel.isLocked
+                                        ? "مقفل"
+                                        : channel.isQueuePaused
+                                        ? "متوقف مؤقتًا"
+                                        : "متصل"}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    )}
+
     {section === "Content" && (
       <section className="card media-library">
         <div className="media-library-header">
@@ -1686,6 +1853,14 @@ return (
 </div>
 
 );
+}
+
+function formatBufferReset(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return Math.ceil(seconds) + " ث";
+  if (seconds < 3600) return Math.floor(seconds / 60) + " د";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + " س";
+  return Math.floor(seconds / 86400) + " يوم";
 }
 
 function formatMediaSize(size?: string | null) {
