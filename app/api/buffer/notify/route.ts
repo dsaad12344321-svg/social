@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const BUFFER_API_URL = "https://api.buffer.com";
-const NOTIFICATION_DELAY_MS = 60 * 1000;
+const NOTIFICATION_DELAY_MS = 3 * 60 * 1000;
 
 type BufferChannel = {
   id: string;
