@@ -1793,7 +1793,16 @@ return (
                       publishingId === post.id ||
                       notifyingId === post.id
                     }
-                    onClick={() => notifyPost(post)}
+                    onClick={() => {
+                      console.log("=== NOTIFY BUTTON CLICK ===", {
+                        postId: post.id,
+                        media: post.media,
+                        mediaType: post.mediaType,
+                        platforms: post.platforms,
+                        channelIds: post.channelIds,
+                      });
+                      notifyPost(post);
+                    }}
                   >
                     {notifyingId === post.id
                       ? "جاري تجهيز الإشعار..."
