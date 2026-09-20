@@ -185,6 +185,44 @@ function getBufferVideoUrl(request: Request, videoUrl: string): string {
   }
 }
 
+async function getPostDiagnostics(apiKey: string, postId: string) {
+  const query = `
+    query GetPostDiagnostics($id: PostId!) {
+      post(input: { id: $id }) {
+        id
+        status
+        schedulingType
+        shareMode
+        notificationStatus
+        via
+        dueAt
+        channelId
+        allowedActions
+        assets {
+          id
+          mimeType
+          source
+          thumbnail
+        }
+      }
+    }
+  `;
+
+  const response = await bufferRequest(
+    apiKey,
+    query,
+    { id: postId },
+    "GET_NOTIFICATION_POST_DIAGNOSTICS"
+  );
+
+  console.log(
+    "=== BUFFER NOTIFICATION POST DIAGNOSTICS ===",
+    JSON.stringify(response, null, 2)
+  );
+
+  return response;
+}
+
 async function createNotificationPost(
   apiKey: string,
   channel: BufferChannel,
@@ -457,13 +495,19 @@ export async function POST(request: Request) {
           continue;
         }
 
+        const postId = payload?.post?.id;
+
+        if (postId) {
+          await getPostDiagnostics(apiKey, postId);
+        }
+
         results.push({
           channelId: channel.id,
           channelName: channel.name,
           service: channel.service,
           account: channel.account,
           success: true,
-          postId: payload?.post?.id,
+          postId,
           status: payload?.post?.status,
           dueAt: payload?.post?.dueAt ?? dueAt,
         });
