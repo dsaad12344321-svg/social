@@ -172,6 +172,7 @@ const [platforms, setPlatforms] = useState<Platform[]>([
 const [section, setSection] = useState("Dashboard");
 const [uploading, setUploading] = useState(false);
 const [publishingId, setPublishingId] = useState<string | null>(null);
+const [notifyingId, setNotifyingId] = useState<string | null>(null);
 
 const [bufferChannels, setBufferChannels] = useState<BufferChannel[]>(
 []
@@ -213,17 +214,6 @@ async function handleMediaUpload(
       ? "video"
       : "image";
 
-  if (
-    platforms.includes("YouTube") &&
-    detectedType !== "video"
-  ) {
-    alert(
-      "عند اختيار YouTube يجب رفع فيديو"
-    );
-
-    event.target.value = "";
-    return;
-  }
 
   const MAX_FILE_SIZE =
     500 * 1024 * 1024;
@@ -855,16 +845,6 @@ if (isSelected) {
   return;
 }
 
-if (
-  platform === "YouTube" &&
-  media &&
-  mediaType !== "video"
-) {
-  alert(
-    "YouTube يحتاج فيديو. استخدم زر Upload لرفع فيديو."
-  );
-  return;
-}
 
 setPlatforms([
   ...platforms,
@@ -964,6 +944,124 @@ async function getVideoDuration(videoUrl: string): Promise<number> {
     };
     video.src = videoUrl;
   });
+}
+
+async function notifyPost(
+  post: Post
+) {
+  if (!post.media) {
+    alert("لا توجد صورة أو فيديو لهذا المنشور");
+    return;
+  }
+
+  if (!post.caption.trim()) {
+    alert("لا يوجد Caption لهذا المنشور");
+    return;
+  }
+
+  if (!post.channelIds || post.channelIds.length === 0) {
+    alert("لم يتم العثور على حساب Buffer للمنصات المختارة");
+    return;
+  }
+
+  setNotifyingId(post.id);
+
+  try {
+    let videoUrl = post.media;
+
+    if (post.mediaType === "image" && post.platforms.includes("YouTube")) {
+      const convertResponse = await fetch("/api/media/image-to-video", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mediaUrl: post.media,
+        }),
+      });
+
+      const convertData = await convertResponse.json();
+
+      if (!convertResponse.ok || !convertData.success || !convertData.url) {
+        throw new Error(
+          convertData?.error || "فشل تحويل الصورة إلى فيديو"
+        );
+      }
+
+      videoUrl = convertData.url;
+    }
+
+    const response = await fetch("/api/buffer/notify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        videoUrl,
+        caption: post.caption,
+        channelIds: post.channelIds,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || (!data.success && !data.partialSuccess)) {
+      throw new Error(
+        data?.error || "فشل جدولة إشعار Buffer"
+      );
+    }
+
+    setPosts((current) =>
+      current.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              status: data.partialSuccess ? "failed" : "scheduled",
+              error: data.partialSuccess
+                ? `تمت الجدولة على ${data.scheduled} من ${data.total} حسابات`
+                : undefined,
+            }
+          : item
+      )
+    );
+
+    if (data.partialSuccess) {
+      alert(
+        `تمت الجدولة جزئيًا: ${data.scheduled} من ${data.total} حسابات`
+      );
+    } else {
+      alert(
+        "تم جدولة الإشعار. سيصل إشعار النشر من المنصة قريبًا."
+      );
+    }
+
+    console.log("Buffer notification results:", data.results);
+  } catch (error) {
+    console.error("Notify error:", error);
+
+    setPosts((current) =>
+      current.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              status: "failed",
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "فشل جدولة الإشعار",
+            }
+          : item
+      )
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : "فشل جدولة الإشعار"
+    );
+  } finally {
+    setNotifyingId(null);
+  }
 }
 
 async function publishPost(
@@ -1668,24 +1766,32 @@ return (
                   "center",
               }}
             >
-              {post.status !==
-                "published" && (
-                <button
-                  disabled={
-                    publishingId ===
-                    post.id
-                  }
-                  onClick={() =>
-                    publishPost(
-                      post
-                    )
-                  }
-                >
-                  {publishingId ===
-                  post.id
-                    ? "جاري النشر..."
-                    : "نشر الآن"}
-                </button>
+              {post.status !== "published" && (
+                <>
+                  <button
+                    disabled={
+                      publishingId === post.id ||
+                      notifyingId === post.id
+                    }
+                    onClick={() => publishPost(post)}
+                  >
+                    {publishingId === post.id
+                      ? "جاري النشر..."
+                      : "نشر الآن"}
+                  </button>
+
+                  <button
+                    disabled={
+                      publishingId === post.id ||
+                      notifyingId === post.id
+                    }
+                    onClick={() => notifyPost(post)}
+                  >
+                    {notifyingId === post.id
+                      ? "جاري تجهيز الإشعار..."
+                      : "Notify Me"}
+                  </button>
+                </>
               )}
 
               <button
