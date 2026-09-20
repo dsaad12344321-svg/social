@@ -32,6 +32,15 @@ export async function HEAD(
       return new Response("Missing file ID.", { status: 400 });
     }
 
+    console.log("=== MEDIA REQUEST DEBUG ===", {
+      method: "HEAD",
+      fileId,
+      userAgent: request.headers.get("user-agent"),
+      range: request.headers.get("range"),
+      accept: request.headers.get("accept"),
+      host: request.headers.get("host"),
+    });
+
     const drive = getDriveClient();
 
     const metadataResponse = await drive.files.get({
@@ -45,6 +54,14 @@ export async function HEAD(
     if (!metadata.id) {
       return new Response("File not found.", { status: 404 });
     }
+
+    console.log("=== MEDIA METADATA DEBUG ===", {
+      method: "HEAD",
+      fileId,
+      name: metadata.name,
+      mimeType: metadata.mimeType,
+      size: metadata.size,
+    });
 
     const mimeType =
       metadata.mimeType || "application/octet-stream";
@@ -145,6 +162,15 @@ export async function GET(
       return new Response("Missing file ID.", { status: 400 });
     }
 
+    console.log("=== MEDIA REQUEST DEBUG ===", {
+      method: "GET",
+      fileId,
+      userAgent: request.headers.get("user-agent"),
+      range: request.headers.get("range"),
+      accept: request.headers.get("accept"),
+      host: request.headers.get("host"),
+    });
+
     const drive = getDriveClient();
 
     const metadataResponse = await drive.files.get({
@@ -158,6 +184,14 @@ export async function GET(
     if (!metadata.id) {
       return new Response("File not found.", { status: 404 });
     }
+
+    console.log("=== MEDIA METADATA DEBUG ===", {
+      method: "GET",
+      fileId,
+      name: metadata.name,
+      mimeType: metadata.mimeType,
+      size: metadata.size,
+    });
 
     const mimeType =
       metadata.mimeType || "application/octet-stream";
@@ -239,6 +273,14 @@ export async function GET(
           : {}),
       }
     );
+
+    console.log("=== MEDIA DRIVE RESPONSE DEBUG ===", {
+      method: "GET",
+      fileId,
+      driveStatus: getStreamStatus(driveResponse),
+      driveContentLength: getHeader(driveResponse, "content-length"),
+      driveContentRange: getHeader(driveResponse, "content-range"),
+    });
 
     const nodeStream = driveResponse.data;
     const webStream = Readable.toWeb(
