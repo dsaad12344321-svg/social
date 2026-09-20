@@ -9,12 +9,20 @@ type RouteContext = {
 export const runtime = "nodejs";
 
 export async function HEAD(
-  _request: Request,
+  request: Request,
   context: RouteContext
 ): Promise<Response> {
   try {
     const { id } = await context.params;
     const fileId = decodeURIComponent(id);
+
+    console.log("=== BUFFER MEDIA REQUEST DEBUG ===", {
+      method: request.method,
+      fileId,
+      range: request.headers.get("range"),
+      userAgent: request.headers.get("user-agent"),
+      accept: request.headers.get("accept"),
+    });
 
     if (!fileId) {
       return new Response("Missing file ID.", { status: 400 });
@@ -48,12 +56,20 @@ export async function HEAD(
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext
 ): Promise<Response> {
   try {
     const { id } = await context.params;
     const fileId = decodeURIComponent(id);
+
+    console.log("=== BUFFER MEDIA REQUEST DEBUG ===", {
+      method: request.method,
+      fileId,
+      range: request.headers.get("range"),
+      userAgent: request.headers.get("user-agent"),
+      accept: request.headers.get("accept"),
+    });
 
     if (!fileId) {
       return new Response("Missing file ID.", { status: 400 });
@@ -61,6 +77,16 @@ export async function GET(
 
     const metadata = await getMediaMetadata(fileId);
     const drive = getDriveClient();
+
+    console.log("=== BUFFER MEDIA RESPONSE DEBUG ===", {
+      method: request.method,
+      fileId,
+      status: 200,
+      contentType: metadata.mimeType,
+      contentLength: metadata.size,
+      contentDisposition: metadata.name,
+      acceptRanges: "bytes",
+    });
 
     const driveResponse = await drive.files.get(
       {
