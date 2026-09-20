@@ -282,6 +282,7 @@ async function createNotificationPost(
           schedulingType: notification
           mode: customScheduled
           dueAt: $dueAt
+          source: "buffer"
 
           assets: [
             {
