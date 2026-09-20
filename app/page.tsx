@@ -2025,6 +2025,12 @@ return (
                     />
                   )}
                   {item.pinned && <span className="media-pin-badge" aria-label="مثبت">📌</span>}
+                  <span
+                    className="media-type-badge"
+                    aria-label={item.mediaType === "video" ? "فيديو" : "صورة"}
+                  >
+                    {item.mediaType === "video" ? "فيديو" : "صورة"}
+                  </span>
                 </div>
                 <div className="media-card-body">
                   <strong title={item.name}>{item.name}</strong>
