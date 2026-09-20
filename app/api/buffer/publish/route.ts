@@ -482,6 +482,31 @@ async function createYoutubePost(
     );
 }
 
+function getBufferImageUrl(request: Request, imageUrl: string): string {
+  if (!imageUrl) return imageUrl;
+
+  try {
+    const parsedUrl = new URL(imageUrl, request.url);
+
+    if (parsedUrl.pathname.startsWith("/api/media/")) {
+      const fileId = parsedUrl.pathname
+        .slice("/api/media/".length)
+        .split("/")[0];
+
+      if (fileId) {
+        return new URL(
+          `/api/buffer/media/${encodeURIComponent(fileId)}`,
+          request.url
+        ).toString();
+      }
+    }
+
+    return parsedUrl.toString();
+  } catch {
+    return imageUrl;
+  }
+}
+
 function getBufferVideoUrl(
   request: Request,
   videoUrl: string
@@ -536,6 +561,11 @@ export async function POST(request: Request) {
     const bufferVideoUrl = getBufferVideoUrl(
       request,
       videoUrl
+    );
+
+    const bufferImageUrl = getBufferImageUrl(
+      request,
+      imageUrl
     );
 
     const caption =
@@ -891,7 +921,7 @@ if (!imageUrl) {
             apiKey,
             channel.id,
             caption,
-            imageUrl,
+            bufferImageUrl,
             channel.service
           );
 
