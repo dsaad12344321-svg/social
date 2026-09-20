@@ -104,6 +104,7 @@ async function runFfmpeg(
 }
 
 export async function POST(request: Request) {
+  console.log("=== POST /api/media/image-to-video ===");
   let tempDir = "";
 
   try {
