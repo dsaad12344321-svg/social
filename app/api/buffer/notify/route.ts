@@ -193,10 +193,10 @@ async function createNotificationPost(
   dueAt: string
 ) {
   const normalizedService = normalizeService(channel.service);
+  const isYoutube = normalizedService === "youtube";
 
-  const youtubeMetadata =
-    normalizedService === "youtube"
-      ? `
+  const youtubeMetadata = isYoutube
+    ? `
           metadata: {
             youtube: {
               title: $youtubeTitle
@@ -204,16 +204,20 @@ async function createNotificationPost(
             }
           }
         `
-      : "";
+    : "";
+
+  const youtubeVariables = isYoutube
+    ? `,
+      $youtubeTitle: String!,
+      $categoryId: String!`
+    : "";
 
   const mutation = `
     mutation CreateNotificationPost(
       $channelId: ChannelId!,
       $text: String!,
       $videoUrl: String!,
-      $dueAt: DateTime!,
-      $youtubeTitle: String!,
-      $categoryId: String!
+      $dueAt: DateTime!${youtubeVariables}
     ) {
       createPost(
         input: {
@@ -255,17 +259,22 @@ async function createNotificationPost(
     }
   `;
 
+  const variables: Record<string, unknown> = {
+    channelId: channel.id,
+    text: caption,
+    videoUrl,
+    dueAt,
+  };
+
+  if (isYoutube) {
+    variables.youtubeTitle = getYoutubeTitle(caption);
+    variables.categoryId = YOUTUBE_CATEGORY_ID;
+  }
+
   return bufferRequest(
     apiKey,
     mutation,
-    {
-      channelId: channel.id,
-      text: caption,
-      videoUrl,
-      dueAt,
-      youtubeTitle: getYoutubeTitle(caption),
-      categoryId: YOUTUBE_CATEGORY_ID,
-    },
+    variables,
     `CREATE_${normalizedService.toUpperCase()}_NOTIFICATION_POST`
   );
 }
