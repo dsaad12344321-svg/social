@@ -173,7 +173,7 @@ function getBufferVideoUrl(request: Request, videoUrl: string): string {
 
       if (fileId) {
         return new URL(
-          `/api/media/${encodeURIComponent(fileId)}`,
+          `/api/buffer/media/${encodeURIComponent(fileId)}`,
           request.url
         ).toString();
       }
