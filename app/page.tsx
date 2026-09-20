@@ -969,7 +969,7 @@ async function notifyPost(
   try {
     let videoUrl = post.media;
 
-    if (post.mediaType === "image" && post.platforms.includes("YouTube")) {
+    if (post.mediaType === "image") {
       const convertResponse = await fetch("/api/media/image-to-video", {
         method: "POST",
         headers: {
