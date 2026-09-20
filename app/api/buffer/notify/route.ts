@@ -10,6 +10,7 @@ type BufferChannel = {
   service: string;
   isDisconnected?: boolean;
   isLocked?: boolean;
+  hasActiveMemberDevice?: boolean;
   account: number;
 };
 
@@ -121,6 +122,7 @@ async function getChannels(
           service
           isDisconnected
           isLocked
+          hasActiveMemberDevice
         }
       }
     `;
@@ -133,6 +135,7 @@ async function getChannels(
         service: string;
         isDisconnected?: boolean;
         isLocked?: boolean;
+        hasActiveMemberDevice?: boolean;
       }>;
     }>(
       apiKey,
@@ -461,6 +464,21 @@ export async function POST(request: Request) {
       }
 
       try {
+        console.log(
+          "=== BUFFER NOTIFICATION CHANNEL DEVICE DEBUG ===",
+          JSON.stringify(
+            {
+              channelId: channel.id,
+              channelName: channel.name,
+              service: channel.service,
+              account: channel.account,
+              hasActiveMemberDevice: channel.hasActiveMemberDevice,
+            },
+            null,
+            2
+          )
+        );
+
         const response = await createNotificationPost(
           apiKey,
           channel,
