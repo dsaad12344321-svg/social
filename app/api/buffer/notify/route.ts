@@ -11,6 +11,11 @@ type BufferChannel = {
   isDisconnected?: boolean;
   isLocked?: boolean;
   hasActiveMemberDevice?: boolean;
+  allowedActions?: string[];
+  organizationId?: string;
+  type?: string;
+  descriptor?: string;
+  scopes?: string[];
   account: number;
 };
 
@@ -123,6 +128,11 @@ async function getChannels(
           isDisconnected
           isLocked
           hasActiveMemberDevice
+          allowedActions
+          organizationId
+          type
+          descriptor
+          scopes
         }
       }
     `;
@@ -136,6 +146,11 @@ async function getChannels(
         isDisconnected?: boolean;
         isLocked?: boolean;
         hasActiveMemberDevice?: boolean;
+        allowedActions?: string[];
+        organizationId?: string;
+        type?: string;
+        descriptor?: string;
+        scopes?: string[];
       }>;
     }>(
       apiKey,
@@ -473,6 +488,11 @@ export async function POST(request: Request) {
               service: channel.service,
               account: channel.account,
               hasActiveMemberDevice: channel.hasActiveMemberDevice,
+              allowedActions: channel.allowedActions,
+              organizationId: channel.organizationId,
+              type: channel.type,
+              descriptor: channel.descriptor,
+              scopes: channel.scopes,
             },
             null,
             2
