@@ -336,6 +336,81 @@ async function createNotificationPost(
   );
 }
 
+export async function GET(request: Request) {
+  try {
+    const postId = new URL(request.url).searchParams.get("postId")?.trim();
+
+    if (!postId) {
+      return NextResponse.json(
+        { success: false, error: "postId is required" },
+        { status: 400 }
+      );
+    }
+
+    const apiKey = process.env.BUFFER_API_KEY_1;
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { success: false, error: "No Buffer API key configured" },
+        { status: 500 }
+      );
+    }
+
+    const query = `
+      query GetManualPostDiagnostics($id: PostId!) {
+        post(input: { id: $id }) {
+          id
+          text
+          status
+          schedulingType
+          shareMode
+          notificationStatus
+          via
+          dueAt
+          channelId
+          allowedActions
+          assets {
+            id
+            mimeType
+            source
+            thumbnail
+          }
+        }
+      }
+    `;
+
+    const response = await bufferRequest(
+      apiKey,
+      query,
+      { id: postId },
+      "GET_MANUAL_POST_DIAGNOSTICS"
+    );
+
+    console.log(
+      "=== BUFFER MANUAL POST DIAGNOSTICS ===",
+      JSON.stringify(response, null, 2)
+    );
+
+    return NextResponse.json({
+      success: !response.errors?.length && Boolean(response.data?.post),
+      diagnostics: response,
+    });
+  } catch (error) {
+    console.error("Buffer manual post diagnostic error:", error);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to inspect Buffer post",
+      },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
