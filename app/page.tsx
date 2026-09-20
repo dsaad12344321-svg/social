@@ -949,6 +949,14 @@ async function getVideoDuration(videoUrl: string): Promise<number> {
 async function notifyPost(
   post: Post
 ) {
+  console.log("=== NOTIFY POST DEBUG ===", {
+    postId: post.id,
+    media: post.media,
+    mediaType: post.mediaType,
+    platforms: post.platforms,
+    channelIds: post.channelIds,
+    caption: post.caption,
+  });
   if (!post.media) {
     alert("لا توجد صورة أو فيديو لهذا المنشور");
     return;
