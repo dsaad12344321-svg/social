@@ -55,29 +55,21 @@ export async function HEAD(
       return new Response("File not found.", { status: 404 });
     }
 
-    console.log("=== MEDIA METADATA DEBUG ===", {
-      method: "HEAD",
-      fileId,
-      name: metadata.name,
-      mimeType: metadata.mimeType,
-      size: metadata.size,
-    });
-
-    const mimeType =
-      metadata.mimeType || "application/octet-stream";
+    const mimeType = metadata.mimeType || "application/octet-stream";
     const totalSize = getFileSize(metadata.size);
-
-    const responseHeaders = createBaseHeaders(
-      mimeType,
-      metadata.name
-    );
+    const responseHeaders = createBaseHeaders(mimeType, metadata.name);
 
     if (totalSize !== undefined) {
-      responseHeaders.set(
-        "Content-Length",
-        String(totalSize)
-      );
+      responseHeaders.set("Content-Length", String(totalSize));
     }
+
+    console.log("=== MEDIA HEAD VALIDATION DEBUG ===", {
+      fileId,
+      name: metadata.name,
+      mimeType,
+      size: totalSize,
+      validation: "metadata-only",
+    });
 
     const range = request.headers.get("range");
 
@@ -85,34 +77,12 @@ export async function HEAD(
       const parsedRange = parseRange(range, totalSize);
 
       if ("invalid" in parsedRange) {
-        console.warn("MEDIA RANGE DEBUG", {
-          method: "HEAD",
-          fileId,
-          requestedRange: range,
-          totalSize,
-          reason: "invalid-range",
-        });
-
-        responseHeaders.set(
-          "Content-Range",
-          `bytes */${totalSize}`
-        );
-
+        responseHeaders.set("Content-Range", `bytes */${totalSize}`);
         return new Response(null, {
           status: 416,
           headers: responseHeaders,
         });
       }
-
-      console.log("MEDIA RANGE DEBUG", {
-        method: "HEAD",
-        fileId,
-        requestedRange: range,
-        totalSize,
-        normalizedRange: parsedRange.header,
-        start: parsedRange.start,
-        end: parsedRange.end,
-      });
 
       responseHeaders.set(
         "Content-Range",
@@ -137,19 +107,14 @@ export async function HEAD(
     console.error("Google Drive media HEAD error:", error);
 
     return new Response(
-      error instanceof Error
-        ? error.message
-        : "Failed to load media metadata.",
+      error instanceof Error ? error.message : "Failed to load media metadata.",
       {
         status: getErrorStatus(error),
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-        },
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
       }
     );
   }
 }
-
 export async function GET(
   request: Request,
   context: RouteContext
